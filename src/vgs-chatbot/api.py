@@ -108,6 +108,6 @@ if __name__ == '__main__':
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="What duration of ECG does HeartKey support?", 
+    response = query_api(query_input="What are the wind limits?", 
                             docsearch=docsearch)
     logging.info(response)
