@@ -1,0 +1,113 @@
+# api.py - A chatbot to help with 2FTS documentation.
+
+import os
+import logging
+import sys
+from pathlib import Path
+from PyPDF2 import PdfReader
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.text_splitter import CharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.chains.question_answering import load_qa_chain
+from langchain.llms import OpenAI
+from dotenv import load_dotenv
+from io import BytesIO
+
+# Constants.
+VECTOR_DATAFILE = "vector_database"
+DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
+
+# Retrieve OpenAI API key.
+load_dotenv()
+openai_api_key = os.getenv("OPENAI_API_KEY")
+
+
+def create_docsearch(pdf_dir: list):
+    """Create docsearch database from PDF files."""
+
+    # Create embeddings object for OpenAIs. 
+    embeddings = OpenAIEmbeddings()
+
+    # Check if docsearch database already exists.
+    if Path(VECTOR_DATAFILE).exists():
+        # Load docsearch database.
+        docsearch = FAISS.load_local(VECTOR_DATAFILE, embeddings)
+        return docsearch
+    
+    # Get PDF files in the directory.
+    pdf_files = list(pdf_dir.glob("*.pdf"))
+
+    # Extract text from PDF files.
+    raw_text = ""
+    for pdf_file in pdf_files:
+
+        # Check if file is uploaded from streamlit.
+        # TODO: Add proper input validation here.
+        if isinstance(pdf_file, str):
+            assert pdf_file.endswith(".pdf")
+            reader = PdfReader(str(pdf_file))
+        elif isinstance(pdf_file, Path):
+            assert pdf_file.suffix == ".pdf"
+            reader = PdfReader(str(pdf_file))
+        else:
+            reader = PdfReader(BytesIO(pdf_file.getbuffer()))
+
+        for page in reader.pages:
+            raw_text += page.extract_text()
+        raw_text += "\n"
+
+    # Split text by paragraph with overlap.
+    text_splitter = CharacterTextSplitter(
+        separator="\n",
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len,
+    )
+    texts = text_splitter.split_text(raw_text)
+
+    # Download embeddings from OpenAI.
+    docsearch = FAISS.from_texts(texts, embeddings)
+
+    # Save docsearch database.
+    docsearch.save_local(VECTOR_DATAFILE)
+
+    return docsearch
+
+
+def query_api(query_input, docsearch) -> str:
+    """Query API."""
+
+    # Create chain.
+    chain = load_qa_chain(
+        OpenAI(),
+        chain_type="stuff"
+    )
+
+    # Search for similar split elements of text.
+    n_similar_texts = 3
+    docs = docsearch.similarity_search(query_input, n_similar_texts)
+
+    # Query the LLM to make sense of the related elements of text.
+    response = chain.run(input_documents=docs, question=query_input)
+    return response
+
+
+if __name__ == '__main__':
+    # Set up logging.
+    logging.basicConfig(level=logging.INFO)
+
+    # Get directory where the PDF files are stored.
+    if len(sys.argv) > 1:
+        # Command line argument.
+        pdf_dir = Path(sys.argv[1])
+    else:
+        # Default (no command line arguments passed).
+        pdf_dir = DEFAULT_DATA_DIR
+
+    # Create docsearch database.
+    docsearch = create_docsearch(DEFAULT_DATA_DIR)
+
+    # Query API.
+    response = query_api(query_input="What duration of ECG does HeartKey support?", 
+                            docsearch=docsearch)
+    logging.info(response)
