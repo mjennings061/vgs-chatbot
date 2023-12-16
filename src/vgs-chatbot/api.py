@@ -23,7 +23,7 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
-def create_docsearch(pdf_dir: list):
+def create_docsearch(document_dir: list):
     """Create docsearch database from PDF files."""
 
     # Create embeddings object for OpenAIs. 
@@ -36,7 +36,7 @@ def create_docsearch(pdf_dir: list):
         return docsearch
     
     # Get PDF files in the directory.
-    pdf_files = list(pdf_dir.glob("*.pdf"))
+    pdf_files = list(document_dir.glob("*.pdf"))
 
     # Extract text from PDF files.
     raw_text = ""
@@ -57,6 +57,9 @@ def create_docsearch(pdf_dir: list):
             raw_text += page.extract_text()
         raw_text += "\n"
 
+    # TODO: Word document text extraction.
+    
+
     # Split text by paragraph with overlap.
     text_splitter = CharacterTextSplitter(
         separator="\n",
@@ -75,7 +78,7 @@ def create_docsearch(pdf_dir: list):
     return docsearch
 
 
-def query_api(query_input, docsearch) -> str:
+def query_api(query_input, docsearch, context="") -> str:
     """Query API."""
 
     # Create chain.
@@ -100,10 +103,10 @@ if __name__ == '__main__':
     # Get directory where the PDF files are stored.
     if len(sys.argv) > 1:
         # Command line argument.
-        pdf_dir = Path(sys.argv[1])
+        document_dir = Path(sys.argv[1])
     else:
         # Default (no command line arguments passed).
-        pdf_dir = DEFAULT_DATA_DIR
+        document_dir = DEFAULT_DATA_DIR
 
     # Create docsearch database.
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
