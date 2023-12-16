@@ -16,13 +16,14 @@ from io import BytesIO
 # Constants.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
+PROMPT_PREAMBLE = "\nAlso, show me where I can find the answer in the documentation."
 
 # Retrieve OpenAI API key.
 load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
-def create_docsearch(pdf_dir: list):
+def create_docsearch(document_dir: list):
     """Create docsearch database from PDF files."""
 
     # Create embeddings object for OpenAIs. 
@@ -35,7 +36,7 @@ def create_docsearch(pdf_dir: list):
         return docsearch
     
     # Get PDF files in the directory.
-    pdf_files = list(pdf_dir.glob("*.pdf"))
+    pdf_files = list(document_dir.glob("*.pdf"))
 
     # Extract text from PDF files.
     raw_text = ""
@@ -56,6 +57,9 @@ def create_docsearch(pdf_dir: list):
             raw_text += page.extract_text()
         raw_text += "\n"
 
+    # TODO: Word document text extraction.
+    
+
     # Split text by paragraph with overlap.
     text_splitter = CharacterTextSplitter(
         separator="\n",
@@ -74,7 +78,7 @@ def create_docsearch(pdf_dir: list):
     return docsearch
 
 
-def query_api(query_input, docsearch) -> str:
+def query_api(query_input, docsearch, context="") -> str:
     """Query API."""
 
     # Create chain.
@@ -84,7 +88,7 @@ def query_api(query_input, docsearch) -> str:
     )
 
     # Search for similar split elements of text.
-    n_similar_texts = 3
+    n_similar_texts = 5
     docs = docsearch.similarity_search(query_input, n_similar_texts)
 
     # Query the LLM to make sense of the related elements of text.
@@ -99,15 +103,15 @@ if __name__ == '__main__':
     # Get directory where the PDF files are stored.
     if len(sys.argv) > 1:
         # Command line argument.
-        pdf_dir = Path(sys.argv[1])
+        document_dir = Path(sys.argv[1])
     else:
         # Default (no command line arguments passed).
-        pdf_dir = DEFAULT_DATA_DIR
+        document_dir = DEFAULT_DATA_DIR
 
     # Create docsearch database.
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="What duration of ECG does HeartKey support?", 
+    response = query_api(query_input="What are the wind limits?", 
                             docsearch=docsearch)
     logging.info(response)

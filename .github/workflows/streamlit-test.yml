@@ -1,0 +1,39 @@
+name: Test Streamlit App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' # Set your Python version here
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Start Streamlit app
+      run: |
+        streamlit run src/vgs-chatbot/streamlit_app.py >& streamlit_log.txt &
+        sleep 5 # Allow some time for the server to start
+
+    - name: Get Streamlit network URL
+      id: get_url
+      run: |
+        URL=$(grep -oP 'Network URL: \Khttp://[0-9\.]+:8501' streamlit_log.txt)
+        echo "STREAMLIT_URL=$URL" >> $GITHUB_ENV
+        
+    - name: Test streamlit app
+      run: |
+        curl $STREAMLIT_URL
