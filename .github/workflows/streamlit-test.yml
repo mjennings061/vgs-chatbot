@@ -32,8 +32,8 @@ jobs:
       id: get_url
       run: |
         URL=$(grep -oP 'Network URL: \Khttp://[0-9\.]+:8501' streamlit_log.txt)
-        echo "::set-output name=streamlit_url::$URL"
+        echo "STREAMLIT_URL=$URL" >> $GITHUB_ENV
         
     - name: Test streamlit app
       run: |
-        curl ${{ steps.get_url.outputs.streamlit_url }}
+        curl $STREAMLIT_URL
