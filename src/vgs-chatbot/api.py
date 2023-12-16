@@ -16,6 +16,7 @@ from io import BytesIO
 # Constants.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
+PROMPT_PREAMBLE = "\nAlso, show me where I can find the answer in the documentation."
 
 # Retrieve OpenAI API key.
 load_dotenv()
@@ -84,7 +85,7 @@ def query_api(query_input, docsearch) -> str:
     )
 
     # Search for similar split elements of text.
-    n_similar_texts = 3
+    n_similar_texts = 5
     docs = docsearch.similarity_search(query_input, n_similar_texts)
 
     # Query the LLM to make sense of the related elements of text.
