@@ -23,11 +23,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Start streamlit app
+    - name: Start Streamlit app
       run: |
-        timeout 10s streamlit run src/vgs-chatbot/streamlit_app.py &
-        sleep 5 # Wait for the server to start
+        streamlit run src/vgs-chatbot/streamlit_app.py >& streamlit_log.txt &
+        sleep 5 # Allow some time for the server to start
+
+    - name: Get Streamlit network URL
+      id: get_url
+      run: |
+        URL=$(grep -oP 'Network URL: \Khttp://[0-9\.]+:8501' streamlit_log.txt)
+        echo "::set-output name=streamlit_url::$URL"
         
     - name: Test streamlit app
       run: |
-        curl http://localhost:8501 # Attempt to make a request to the app
+        curl ${{ steps.get_url.outputs.streamlit_url }}
