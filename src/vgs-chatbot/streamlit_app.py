@@ -1,7 +1,7 @@
 # streamlit_app.py - GUI for chatbot.
 
 import streamlit as st
-from api import create_docsearch, query_api, DEFAULT_DATA_DIR, PROMPT_PREAMBLE
+from api import create_docsearch, query_api, PROMPT_PREAMBLE, database_exists
 
 
 def fetch_response(prompt):
@@ -11,13 +11,17 @@ def fetch_response(prompt):
         st.write("Fetching vector embeddings...")
         # Check if docsearch variable exists.
         if "docsearch" not in st.session_state:
-            # Create docsearch database.
-            st.write("Creating vector database...")
-            st.session_state.docsearch = create_docsearch(DEFAULT_DATA_DIR)
+            if not database_exists():
+                st.write("Generating a new vector database...")
+            # Create or fetch docsearch database.
+            st.session_state.docsearch = create_docsearch()
 
-        # Query VGS bot and display the response
+        # Query VGS bot and display the response.
         st.write("Querying VGS Bot...")
         response = query_api(prompt, st.session_state.docsearch)
+        
+        # Collapse status message.
+        status.update(label="Complete!", state="complete", expanded=False)
 
     return response
 
@@ -75,6 +79,14 @@ def app():
         # Add user input to chat history.
         st.session_state.chat_history.append({"role": "user", "content": raw_prompt})
         st.session_state.chat_history.append({"role": "assistant", "content": response})
+
+    # Display contact information.
+    with st.sidebar:
+        st.markdown("""
+            ## Contact Information
+            For any queries or support, please contact us at 
+            [michael.jennings100@rafac.mod.gov.uk](mailto:michael.jennings100@rafac.mod.gov.uk)
+        """)
 
 
 if __name__ == '__main__':
