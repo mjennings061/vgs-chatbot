@@ -80,6 +80,14 @@ def app():
         st.session_state.chat_history.append({"role": "user", "content": raw_prompt})
         st.session_state.chat_history.append({"role": "assistant", "content": response})
 
+    # Display contact information.
+    with st.sidebar:
+        st.markdown("""
+            ## Contact Information
+            For any queries or support, please contact us at 
+            [michael.jennings100@rafac.mod.gov.uk](mailto:michael.jennings100@rafac.mod.gov.uk)
+        """)
+
 
 if __name__ == '__main__':
     # In CLI: "python -m streamlit run src/vgs-chatbot/streamlit_app.py"
