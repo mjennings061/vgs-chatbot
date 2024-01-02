@@ -4,16 +4,16 @@ import os
 import logging
 import sys
 from pathlib import Path
-from PyPDF2 import PdfReader
+from langchain.document_loaders import UnstructuredFileLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.text_splitter import CharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.chains.question_answering import load_qa_chain
 from langchain.llms import OpenAI
 from dotenv import load_dotenv
-from io import BytesIO
 
 # Constants.
+DEBUG = False   # Set to True to force docsearch database to be recreated.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
 PROMPT_PREAMBLE = "\nAlso, show me where I can find the answer in the documentation."
@@ -23,14 +23,33 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
-def create_docsearch(document_dir: list):
-    """Create docsearch database from PDF files."""
+def database_exists() -> bool:
+    """Check if docsearch database exists."""
+    return Path(VECTOR_DATAFILE).exists()
+
+
+def extract_text_from_file(file: str) -> str:
+    """Extract text from the file."""
+    # Read the file and split by page.
+    reader = UnstructuredFileLoader(file)
+    document_contents = reader.load()
+
+    # Extract text from the file.
+    raw_text = ""
+    for page in document_contents:
+        raw_text += page.page_content + "\n"
+
+    return raw_text
+
+
+def create_docsearch(document_dir=DEFAULT_DATA_DIR):
+    """Create docsearch database from text files."""
 
     # Create embeddings object for OpenAIs. 
     embeddings = OpenAIEmbeddings()
 
     # Check if docsearch database already exists.
-    if Path(VECTOR_DATAFILE).exists():
+    if database_exists() and not DEBUG:
         # Load docsearch database.
         docsearch = FAISS.load_local(VECTOR_DATAFILE, embeddings)
         return docsearch
@@ -41,24 +60,11 @@ def create_docsearch(document_dir: list):
     # Extract text from PDF files.
     raw_text = ""
     for pdf_file in pdf_files:
+        raw_text += extract_text_from_file(pdf_file)
 
-        # Check if file is uploaded from streamlit.
-        # TODO: Add proper input validation here.
-        if isinstance(pdf_file, str):
-            assert pdf_file.endswith(".pdf")
-            reader = PdfReader(str(pdf_file))
-        elif isinstance(pdf_file, Path):
-            assert pdf_file.suffix == ".pdf"
-            reader = PdfReader(str(pdf_file))
-        else:
-            reader = PdfReader(BytesIO(pdf_file.getbuffer()))
-
-        for page in reader.pages:
-            raw_text += page.extract_text()
-        raw_text += "\n"
-
+    # TODO: Use spacy to extract sentences.
     # TODO: Word document text extraction.
-    
+    # TODO: Filter out non-ASCII characters, except for newlines.
 
     # Split text by paragraph with overlap.
     text_splitter = CharacterTextSplitter(
@@ -78,7 +84,7 @@ def create_docsearch(document_dir: list):
     return docsearch
 
 
-def query_api(query_input, docsearch, context="") -> str:
+def query_api(query_input, docsearch) -> str:
     """Query API."""
 
     # Create chain.
@@ -100,6 +106,9 @@ if __name__ == '__main__':
     # Set up logging.
     logging.basicConfig(level=logging.INFO)
 
+    # Set up debug when called as the main file.
+    DEBUG = True
+
     # Get directory where the PDF files are stored.
     if len(sys.argv) > 1:
         # Command line argument.
@@ -112,6 +121,6 @@ if __name__ == '__main__':
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="What are the wind limits?", 
-                            docsearch=docsearch)
+    response = query_api(query_input="Where do I find how to write a quarterly summary?", 
+                        docsearch=docsearch)
     logging.info(response)
