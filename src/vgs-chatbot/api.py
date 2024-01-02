@@ -3,10 +3,13 @@
 import os
 import logging
 import sys
+import re
 from pathlib import Path
+
+# Langchain libraries.
 from langchain.document_loaders import UnstructuredFileLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import RecursiveCharacterTextSplitter 
 from langchain.vectorstores import FAISS
 from langchain.chains.question_answering import load_qa_chain
 from langchain.llms import OpenAI
@@ -23,18 +26,26 @@ load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
+def clean_text(text: str) -> str:
+    """Clean text by removing newlines and extra spaces."""
+    # Remove unwanted patterns (e.g., 'UNCONTROLLED COPY WHEN PRINTED')
+    text_no_header = re.sub('UNCONTROLLED COPY WHEN PRINTED', '', text)
+
+    # Replace multiple newlines with a single newline
+    text_fewer_newlines = re.sub(r'\n+', '\n', text_no_header)
+    return text_no_header
+
+
 def database_exists() -> bool:
     """Check if docsearch database exists."""
     return Path(VECTOR_DATAFILE).exists()
 
 
 def extract_text_from_file(file: str) -> str:
-    """Extract text from the file."""
-    # Read the file and split by page.
+    """Extract text from the file and process named entities."""
     reader = UnstructuredFileLoader(file)
     document_contents = reader.load()
 
-    # Extract text from the file.
     raw_text = ""
     for page in document_contents:
         raw_text += page.page_content + "\n"
@@ -58,22 +69,25 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     pdf_files = list(document_dir.glob("*.pdf"))
 
     # Extract text from PDF files.
-    raw_text = ""
+    processed_text = ""
     for pdf_file in pdf_files:
-        raw_text += extract_text_from_file(pdf_file)
+        raw_text = extract_text_from_file(pdf_file)
+        # Use spacy to extract sentences.
+        # processed_text += spacy_sentence_splitter(raw_text)
+        processed_text += raw_text
 
-    # TODO: Use spacy to extract sentences.
     # TODO: Word document text extraction.
-    # TODO: Filter out non-ASCII characters, except for newlines.
+    # Clean text.
+    processed_text = clean_text(processed_text)
 
-    # Split text by paragraph with overlap.
-    text_splitter = CharacterTextSplitter(
-        separator="\n",
+    # # Split text by paragraph with overlap.
+    text_splitter = RecursiveCharacterTextSplitter (
         chunk_size=1000,
         chunk_overlap=200,
-        length_function=len,
     )
-    texts = text_splitter.split_text(raw_text)
+
+    # Split text into chunks.
+    texts = text_splitter.split_text(processed_text)
 
     # Download embeddings from OpenAI.
     docsearch = FAISS.from_texts(texts, embeddings)
