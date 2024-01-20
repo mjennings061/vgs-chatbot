@@ -9,7 +9,7 @@ from pathlib import Path
 # Langchain libraries.
 from langchain.document_loaders import UnstructuredFileLoader
 from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter 
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
 from langchain.chains.question_answering import load_qa_chain
 from langchain.llms import OpenAI
@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 DEBUG = False   # Set to True to force docsearch database to be recreated.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
-PROMPT_PREAMBLE = "\nAlso, show me where I can find the answer in the documentation."
+PROMPT_PREAMBLE = """\nAlso, show me where I can find the answer in
+                the documentation."""
 
 # Retrieve OpenAI API key.
 load_dotenv()
@@ -31,8 +32,6 @@ def clean_text(text: str) -> str:
     # Remove unwanted patterns (e.g., 'UNCONTROLLED COPY WHEN PRINTED')
     text_no_header = re.sub('UNCONTROLLED COPY WHEN PRINTED', '', text)
 
-    # Replace multiple newlines with a single newline
-    text_fewer_newlines = re.sub(r'\n+', '\n', text_no_header)
     return text_no_header
 
 
@@ -56,7 +55,7 @@ def extract_text_from_file(file: str) -> str:
 def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     """Create docsearch database from text files."""
 
-    # Create embeddings object for OpenAIs. 
+    # Create embeddings object for OpenAIs.
     embeddings = OpenAIEmbeddings()
 
     # Check if docsearch database already exists.
@@ -64,7 +63,7 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
         # Load docsearch database.
         docsearch = FAISS.load_local(VECTOR_DATAFILE, embeddings)
         return docsearch
-    
+
     # Get PDF files in the directory.
     pdf_files = list(document_dir.glob("*.pdf"))
 
@@ -81,7 +80,7 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     processed_text = clean_text(processed_text)
 
     # # Split text by paragraph with overlap.
-    text_splitter = RecursiveCharacterTextSplitter (
+    text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
     )
@@ -135,6 +134,7 @@ if __name__ == '__main__':
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="Where do I find how to write a quarterly summary?", 
-                        docsearch=docsearch)
+    response = query_api(query_input="""Where do I find how to write a
+                         quarterly summary?""",
+                         docsearch=docsearch)
     logging.info(response)
