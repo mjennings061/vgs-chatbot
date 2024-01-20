@@ -107,7 +107,7 @@ def app():
     with st.sidebar:
         st.markdown("""
             ## Contact Information
-            For any queries or support, please contact us at \n
+            For any queries or support, please contact us at
             [michael.jennings100@rafac.mod.gov.uk](mailto:michael.jennings100@rafac.mod.gov.uk)
         """)
 
