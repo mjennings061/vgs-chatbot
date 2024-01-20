@@ -1,7 +1,8 @@
 # streamlit_app.py - GUI for chatbot.
 
 import streamlit as st
-from api import create_docsearch, query_api, PROMPT_PREAMBLE, database_exists
+from api import create_docsearch, query_api, \
+                PROMPT_PREAMBLE, database_exists
 
 
 def fetch_response(prompt):

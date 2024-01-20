@@ -39,16 +39,22 @@ def database_exists() -> bool:
     return Path(VECTOR_DATAFILE).exists()
 
 
-def extract_text_from_file(file: str) -> str:
+def extract_text_from_file(file: str) -> list:
     """Extract text from the file and process named entities."""
-    reader = UnstructuredFileLoader(file)
+    # Load file.
+    reader = UnstructuredFileLoader(file_path=str(file))
     document_contents = reader.load()
 
-    raw_text = ""
-    for page in document_contents:
-        raw_text += page.page_content + "\n"
+    # Extract text from file.
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        add_start_index=True
+    )
 
-    return raw_text
+    # Split text into chunks.
+    splits = text_splitter.split_documents(document_contents)
+    return splits
 
 
 def create_docsearch(document_dir=DEFAULT_DATA_DIR):
@@ -60,40 +66,26 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     # Check if docsearch database already exists.
     if database_exists() and not DEBUG:
         # Load docsearch database.
-        docsearch = FAISS.load_local(VECTOR_DATAFILE, embeddings)
-        return docsearch
+        vectorstore = FAISS.load_local(VECTOR_DATAFILE, embeddings)
+        return vectorstore
 
     # Get PDF files in the directory.
     pdf_files = list(document_dir.glob("*.pdf"))
 
     # Extract text from PDF files.
-    processed_text = ""
+    processed_text = []
     for pdf_file in pdf_files:
-        raw_text = extract_text_from_file(pdf_file)
-        # Use spacy to extract sentences.
-        # processed_text += spacy_sentence_splitter(raw_text)
-        processed_text += raw_text
-
-    # TODO: Word document text extraction.
-    # Clean text.
-    processed_text = clean_text(processed_text)
-
-    # # Split text by paragraph with overlap.
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
-    )
-
-    # Split text into chunks.
-    texts = text_splitter.split_text(processed_text)
+        logging.info(f"Processing {pdf_file}")
+        splits = extract_text_from_file(pdf_file)
+        processed_text.append(splits)
 
     # Download embeddings from OpenAI.
-    docsearch = FAISS.from_texts(texts, embeddings)
+    vectorstore = FAISS.from_documents(processed_text, embeddings)
 
     # Save docsearch database.
-    docsearch.save_local(VECTOR_DATAFILE)
+    vectorstore.save_local(VECTOR_DATAFILE)
 
-    return docsearch
+    return vectorstore
 
 
 def query_api(query_input, docsearch) -> str:
