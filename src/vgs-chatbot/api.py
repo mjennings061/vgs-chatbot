@@ -8,10 +8,11 @@ from pathlib import Path
 
 # Langchain libraries.
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.chains.question_answering import load_qa_chain
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAI, OpenAIEmbeddings
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from dotenv import load_dotenv
 
 # Constants.
@@ -57,6 +58,17 @@ def extract_text_from_file(file: str) -> list:
     return splits
 
 
+def format_docs(docs):
+    """Format the documents for the docsearch database.
+
+    Args:
+        docs (list): List of Document objects.
+
+    Returns:
+        str: Formatted documents."""
+    return "\n\n".join(doc.page_content for doc in docs)
+
+
 def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     """Create docsearch database from text files."""
 
@@ -77,10 +89,15 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     for pdf_file in pdf_files:
         logging.info(f"Processing {pdf_file}")
         splits = extract_text_from_file(pdf_file)
-        processed_text.append(splits)
+        # TODO: Instead of adding just one list element, add the contents of
+        #       the list.
+        processed_text.append(0, splits)
 
     # Download embeddings from OpenAI.
-    vectorstore = FAISS.from_documents(processed_text, embeddings)
+    vectorstore = FAISS.from_documents(
+        documents=processed_text,
+        embedding=embeddings
+    )
 
     # Save docsearch database.
     vectorstore.save_local(VECTOR_DATAFILE)
@@ -88,21 +105,35 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     return vectorstore
 
 
-def query_api(query_input, docsearch) -> str:
+def query_api(prompt, vectorstore) -> str:
     """Query API."""
-
-    # Create chain.
-    chain = load_qa_chain(
-        OpenAI(),
-        chain_type="stuff"
+    # Setup vectorstore retriever with nearest 5 documents.
+    N_SIMILAR_TEXTS = 5
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={'k': N_SIMILAR_TEXTS}
     )
 
-    # Search for similar split elements of text.
-    n_similar_texts = 5
-    docs = docsearch.similarity_search(query_input, n_similar_texts)
+    # Initialise large language model.
+    llm = ChatOpenAI(
+        model_name="gpt-3.5-turbo-1106",
+        temperature=0
+    )
+
+    # Define the RAG chain.
+    # TODO: Add a parset to include context.
+    rag_chain = (
+        {
+            "context": retriever | format_docs,
+            "question": RunnablePassthrough()
+        }
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
 
     # Query the LLM to make sense of the related elements of text.
-    response = chain.run(input_documents=docs, question=query_input)
+    response = rag_chain.invoke(prompt)
     return response
 
 
@@ -125,7 +156,7 @@ if __name__ == '__main__':
     docsearch = create_docsearch(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="""Where do I find how to write a
+    response = query_api(prompt="""Where do I find how to write a
                          quarterly summary?""",
-                         docsearch=docsearch)
+                         vectorstore=docsearch)
     logging.info(response)
