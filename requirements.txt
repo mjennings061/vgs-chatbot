@@ -5,4 +5,4 @@ pypdf==3.17.*
 python-dotenv==1.0.*
 streamlit==1.29.*
 tiktoken==0.5.*
-unstructured[docx,pptx]==0.12.*
+unstructured[docx,pdf]==0.12.*
