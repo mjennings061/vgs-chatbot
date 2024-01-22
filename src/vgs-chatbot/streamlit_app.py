@@ -1,6 +1,5 @@
 # streamlit_app.py - GUI for chatbot.
 
-import textwrap
 import streamlit as st
 from api import create_vectorstore, query_api, \
                 PROMPT_PREAMBLE, database_exists
