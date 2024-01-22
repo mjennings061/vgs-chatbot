@@ -21,7 +21,7 @@ from pathlib import Path
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -30,8 +30,6 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 DEBUG = False   # Set to True to force docsearch database to be recreated.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
-PROMPT_PREAMBLE = """\nAlso, show me where I can find the answer in
-                the documentation."""
 
 # Retrieve OpenAI API key.
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -109,12 +107,41 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     return vectorstore
 
 
-def query_api(question, vectorstore) -> str:
+def form_prompt_with_context(user_input, chat_history):
+    """Form prompt with the entire conversation history as context."""
+    # Get all comments from the user in the chat history.
+    user_history = [
+        message["content"]
+        for message in chat_history if message["role"] == "user"
+    ]
+
+    # TODO: Update this to use the MessagesPlaceholder() prompt.
+    # https://python.langchain.com/docs/use_cases/question_answering/chat_history
+
+    # Join user history into a single string.
+    if len(user_history) > 0:
+        user_history = "\n".join(user_history)
+        context = f"""
+            Previous questions for context:
+            ```
+            {user_history}
+            ```
+            New question: """
+    else:
+        context = ""
+
+    # Add the new user input and prompt preamble.
+    prompt = f"{context}{user_input}"
+    return prompt
+
+
+def query_api(question, vectorstore, chat_history) -> str:
     """Query the API.
 
     Args:
         question (str): Question to ask.
         vectorstore (FAISS): Vectorstore object.
+        chat_history (list)[dict]: List of chat messages.
 
     Returns:
         response (str): Response to the question."""
@@ -131,6 +158,10 @@ def query_api(question, vectorstore) -> str:
         temperature=0,
         openai_api_key=openai_api_key
     )
+
+    if chat_history:
+        # Add prompt preamble and contextualise question.
+        question = form_prompt_with_context(question, chat_history)
 
     # Define the prompt.
     TEMPLATE = textwrap.dedent("""
@@ -179,8 +210,14 @@ if __name__ == '__main__':
     docsearch = create_vectorstore(DEFAULT_DATA_DIR)
 
     # Query API.
+    chat_history = [
+        {"role": "user", "content": "What is a quarterly summary?"},
+        {"role": "assistant", "content": """A quarterly summary is a summary
+         of the quarterly activities."""}
+    ]
     response = query_api(
         question="Where do I find how to write a quarterly summary?",
-        vectorstore=docsearch
+        vectorstore=docsearch,
+        chat_history=chat_history
     )
     logging.info(response)

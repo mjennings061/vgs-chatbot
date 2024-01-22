@@ -2,10 +2,10 @@
 
 import streamlit as st
 from api import create_vectorstore, query_api, \
-                PROMPT_PREAMBLE, database_exists
+                form_prompt_with_context, database_exists
 
 
-def fetch_response(prompt):
+def fetch_response(prompt, chat_history):
     """Fetch response from the vgs-chatbot"""
     with st.status(
         label="Finding answer...",
@@ -28,37 +28,16 @@ def fetch_response(prompt):
 
         # Query VGS bot and display the response.
         st.write("Querying VGS Bot...")
-        response = query_api(prompt, st.session_state.vectorstore)
+        response = query_api(
+            question=prompt,
+            vectorstore=st.session_state.vectorstore,
+            chat_history=chat_history
+        )
 
         # Collapse status message.
         status.update(label="Complete!", state="complete", expanded=False)
 
     return response
-
-
-def form_prompt_with_context(user_input, chat_history):
-    """Form prompt with the entire conversation history as context."""
-    # Get all comments from the user in the chat history.
-    user_history = [
-        message["content"]
-        for message in chat_history if message["role"] == "user"
-    ]
-
-    # Join user history into a single string.
-    if len(user_history) > 0:
-        user_history = "\n".join(user_history)
-        context = f"""
-            Previous questions for context:
-            ```
-            {user_history}
-            ```
-            New question: """
-    else:
-        context = ""
-
-    # Add the new user input and prompt preamble.
-    prompt = f"{context}{user_input}{PROMPT_PREAMBLE}"
-    return prompt
 
 
 def app():
@@ -88,12 +67,11 @@ def app():
 
         # Add prompt preamble.
         chat_history = st.session_state.chat_history
-        prompt = form_prompt_with_context(raw_prompt, chat_history)
 
         # Respond to user input.
         with st.chat_message("assistant"):
             # Query VGS bot and display the response.
-            response = fetch_response(prompt)
+            response = fetch_response(raw_prompt, chat_history)
             # Write response to the chat window as the assistant.
             st.write(response)
 
