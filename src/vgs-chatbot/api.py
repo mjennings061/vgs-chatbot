@@ -1,9 +1,19 @@
-# api.py - A chatbot to help with 2FTS documentation.
+""" api.py - A chatbot to help with 2FTS documentation.
+
+This module contains the functions to create the docsearch database
+and query the API.
+
+Example:
+    from api import create_vectorstore, query_api
+    vectorstore = create_vectorstore()
+    response = query_api("Where do I find how to write a quarterly summary?",
+                         docsearch)
+
+"""
 
 import os
 import logging
 import sys
-import re
 import textwrap
 from pathlib import Path
 
@@ -15,7 +25,6 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from dotenv import load_dotenv
 
 # Constants.
 DEBUG = False   # Set to True to force docsearch database to be recreated.
@@ -25,25 +34,25 @@ PROMPT_PREAMBLE = """\nAlso, show me where I can find the answer in
                 the documentation."""
 
 # Retrieve OpenAI API key.
-load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
-def clean_text(text: str) -> str:
-    """Clean text by removing newlines and extra spaces."""
-    # Remove unwanted patterns (e.g., 'UNCONTROLLED COPY WHEN PRINTED')
-    text_no_header = re.sub('UNCONTROLLED COPY WHEN PRINTED', '', text)
-
-    return text_no_header
-
-
 def database_exists() -> bool:
-    """Check if docsearch database exists."""
+    """Check if docsearch database exists.
+
+    Returns:
+        bool: True if docsearch database exists."""
     return Path(VECTOR_DATAFILE).exists()
 
 
 def extract_text_from_file(file: str) -> list:
-    """Extract text from the file and process named entities."""
+    """Extract text from the file and process named entities.
+
+    Args:
+        file (str): Path to file.
+
+    Returns:
+        list [Document()]: List of text chunks."""
     # Load file.
     reader = UnstructuredFileLoader(file_path=str(file))
     document_contents = reader.load()
@@ -60,19 +69,15 @@ def extract_text_from_file(file: str) -> list:
     return splits
 
 
-def format_docs(docs):
-    """Format the documents for the docsearch database.
+def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
+    """Create docsearch database from text files.
 
     Args:
-        docs (list): List of Document objects.
+        document_dir (Path): Path to directory containing
+        PDF files.
 
     Returns:
-        str: Formatted documents."""
-    return "\n\n".join(doc.page_content for doc in docs)
-
-
-def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
-    """Create docsearch database from text files."""
+        vectorstore (FAISS): Vectorstore object."""
 
     # Create embeddings object for OpenAIs.
     embeddings = OpenAIEmbeddings()
@@ -101,12 +106,18 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
 
     # Save docsearch database.
     vectorstore.save_local(VECTOR_DATAFILE)
-
     return vectorstore
 
 
 def query_api(question, vectorstore) -> str:
-    """Query API."""
+    """Query the API.
+
+    Args:
+        question (str): Question to ask.
+        vectorstore (FAISS): Vectorstore object.
+
+    Returns:
+        response (str): Response to the question."""
     # Setup vectorstore retriever with nearest 5 documents.
     N_SIMILAR_TEXTS = 5
     retriever = vectorstore.as_retriever(
@@ -117,15 +128,16 @@ def query_api(question, vectorstore) -> str:
     # Initialise large language model.
     llm = ChatOpenAI(
         model_name="gpt-3.5-turbo-1106",
-        temperature=0
+        temperature=0,
+        openai_api_key=openai_api_key
     )
 
     # Define the prompt.
     TEMPLATE = textwrap.dedent("""
         You are a helpful assistant to retrieve information from 2FTS
         documentation on the Viking glider.
-        Show where to find the answer including the
-        document name and section in the documentation.
+        Answer the question and show where to find the answer
+        including the document name and section in the documentation.
         Do not include index number. Documentation is below:
         -----
         {context}

@@ -13,23 +13,23 @@ def fetch_response(prompt):
         expanded=True,
         state="running"
     ) as status:
-        # Create docsearch database.
+        # Create vectorstore database.
         st.write("Fetching vector embeddings...")
-        # Check if docsearch variable exists.
-        if "docsearch" not in st.session_state:
+        # Check if vectorstore variable exists.
+        if "vectorstore" not in st.session_state:
             if not database_exists():
-                st.write(textwrap.dedent(
-                        """
-                        Generating a new vector database
-                         (this will take a while)...
-                        """
-                ).replace("\n", ""))
-            # Create or fetch docsearch database.
-            st.session_state.docsearch = create_vectorstore()
+                st.write(
+                    """
+                    Generating a new vector database
+                    (this will take a while)...
+                    """
+                )
+            # Create or fetch vectorstore database.
+            st.session_state.vectorstore = create_vectorstore()
 
         # Query VGS bot and display the response.
         st.write("Querying VGS Bot...")
-        response = query_api(prompt, st.session_state.docsearch)
+        response = query_api(prompt, st.session_state.vectorstore)
 
         # Collapse status message.
         status.update(label="Complete!", state="complete", expanded=False)
