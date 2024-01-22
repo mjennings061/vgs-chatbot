@@ -1,25 +1,36 @@
 # streamlit_app.py - GUI for chatbot.
 
+import textwrap
 import streamlit as st
-from api import create_docsearch, query_api, PROMPT_PREAMBLE, database_exists
+from api import create_vectorstore, query_api, \
+                PROMPT_PREAMBLE, database_exists
 
 
 def fetch_response(prompt):
     """Fetch response from the vgs-chatbot"""
-    with st.status(label="Finding answer...", expanded=True, state="running") as status:
-        # Create docsearch database.
+    with st.status(
+        label="Finding answer...",
+        expanded=True,
+        state="running"
+    ) as status:
+        # Create vectorstore database.
         st.write("Fetching vector embeddings...")
-        # Check if docsearch variable exists.
-        if "docsearch" not in st.session_state:
+        # Check if vectorstore variable exists.
+        if "vectorstore" not in st.session_state:
             if not database_exists():
-                st.write("Generating a new vector database...")
-            # Create or fetch docsearch database.
-            st.session_state.docsearch = create_docsearch()
+                st.write(
+                    """
+                    Generating a new vector database
+                    (this will take a while)...
+                    """
+                )
+            # Create or fetch vectorstore database.
+            st.session_state.vectorstore = create_vectorstore()
 
         # Query VGS bot and display the response.
         st.write("Querying VGS Bot...")
-        response = query_api(prompt, st.session_state.docsearch)
-        
+        response = query_api(prompt, st.session_state.vectorstore)
+
         # Collapse status message.
         status.update(label="Complete!", state="complete", expanded=False)
 
@@ -29,12 +40,20 @@ def fetch_response(prompt):
 def form_prompt_with_context(user_input, chat_history):
     """Form prompt with the entire conversation history as context."""
     # Get all comments from the user in the chat history.
-    user_history = [message["content"] for message in chat_history if message["role"] == "user"]
+    user_history = [
+        message["content"]
+        for message in chat_history if message["role"] == "user"
+    ]
 
     # Join user history into a single string.
     if len(user_history) > 0:
         user_history = "\n".join(user_history)
-        context = f"Previous questions for context:```\n{user_history}```\n\nNew question:\n"
+        context = f"""
+            Previous questions for context:
+            ```
+            {user_history}
+            ```
+            New question: """
     else:
         context = ""
 
@@ -45,8 +64,11 @@ def form_prompt_with_context(user_input, chat_history):
 
 def app():
     st.title('2FTS Chatbot')
-    st.write("""Welcome to the 2FTS Chatbot! This chatbot is designed to help you find answers to your questions about 2FTS documentation.
-                To get started, type your question in the chat window below and press Enter.""")
+    st.write("""Welcome to the 2FTS Chatbot!
+             This chatbot is designed to help you find answers to your
+             questions about 2FTS documentation.
+             To get started, type your question in the chat window
+             below and press Enter.""")
     st.divider()
 
     # Initialize chat history.
@@ -77,14 +99,20 @@ def app():
             st.write(response)
 
         # Add user input to chat history.
-        st.session_state.chat_history.append({"role": "user", "content": raw_prompt})
-        st.session_state.chat_history.append({"role": "assistant", "content": response})
+        st.session_state.chat_history.append({
+            "role": "user",
+            "content": raw_prompt
+        })
+        st.session_state.chat_history.append({
+            "role": "assistant",
+            "content": response
+        })
 
     # Display contact information.
     with st.sidebar:
         st.markdown("""
             ## Contact Information
-            For any queries or support, please contact us at 
+            For any queries or support, please contact us at
             [michael.jennings100@rafac.mod.gov.uk](mailto:michael.jennings100@rafac.mod.gov.uk)
         """)
 
