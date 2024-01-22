@@ -3,6 +3,6 @@ langchain==0.1.*
 langchain-openai==0.0.3
 pypdf==3.17.*
 python-dotenv==1.0.*
-streamlit==1.29.*
+streamlit==1.30.*
 tiktoken==0.5.*
 unstructured[docx,pdf]==0.12.*
