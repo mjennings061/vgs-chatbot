@@ -1,3 +1,6 @@
+# Secret key.
+secret.key
+
 # VS Code config.
 .vscode/
 .devcontainer/

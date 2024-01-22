@@ -1,118 +1,162 @@
-# api.py - A chatbot to help with 2FTS documentation.
+""" api.py - A chatbot to help with 2FTS documentation.
+
+This module contains the functions to create the docsearch database
+and query the API.
+
+Example:
+    from api import create_vectorstore, query_api
+    vectorstore = create_vectorstore()
+    response = query_api("Where do I find how to write a quarterly summary?",
+                         docsearch)
+
+"""
 
 import os
 import logging
 import sys
-import re
+import textwrap
 from pathlib import Path
 
 # Langchain libraries.
-from langchain.document_loaders import UnstructuredFileLoader
-from langchain.embeddings.openai import OpenAIEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter 
-from langchain.vectorstores import FAISS
-from langchain.chains.question_answering import load_qa_chain
-from langchain.llms import OpenAI
-from dotenv import load_dotenv
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_community.document_loaders import UnstructuredFileLoader
+from langchain_community.vectorstores import FAISS
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
 # Constants.
 DEBUG = False   # Set to True to force docsearch database to be recreated.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
-PROMPT_PREAMBLE = "\nAlso, show me where I can find the answer in the documentation."
+PROMPT_PREAMBLE = """\nAlso, show me where I can find the answer in
+                the documentation."""
 
 # Retrieve OpenAI API key.
-load_dotenv()
 openai_api_key = os.getenv("OPENAI_API_KEY")
 
 
-def clean_text(text: str) -> str:
-    """Clean text by removing newlines and extra spaces."""
-    # Remove unwanted patterns (e.g., 'UNCONTROLLED COPY WHEN PRINTED')
-    text_no_header = re.sub('UNCONTROLLED COPY WHEN PRINTED', '', text)
-
-    # Replace multiple newlines with a single newline
-    text_fewer_newlines = re.sub(r'\n+', '\n', text_no_header)
-    return text_no_header
-
-
 def database_exists() -> bool:
-    """Check if docsearch database exists."""
+    """Check if docsearch database exists.
+
+    Returns:
+        bool: True if docsearch database exists."""
     return Path(VECTOR_DATAFILE).exists()
 
 
-def extract_text_from_file(file: str) -> str:
-    """Extract text from the file and process named entities."""
-    reader = UnstructuredFileLoader(file)
+def extract_text_from_file(file: str) -> list:
+    """Extract text from the file and process named entities.
+
+    Args:
+        file (str): Path to file.
+
+    Returns:
+        list [Document()]: List of text chunks."""
+    # Load file.
+    reader = UnstructuredFileLoader(file_path=str(file))
     document_contents = reader.load()
 
-    raw_text = ""
-    for page in document_contents:
-        raw_text += page.page_content + "\n"
+    # Extract text from file.
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        add_start_index=True
+    )
 
-    return raw_text
+    # Split text into chunks.
+    splits = text_splitter.split_documents(document_contents)
+    return splits
 
 
-def create_docsearch(document_dir=DEFAULT_DATA_DIR):
-    """Create docsearch database from text files."""
+def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
+    """Create docsearch database from text files.
 
-    # Create embeddings object for OpenAIs. 
+    Args:
+        document_dir (Path): Path to directory containing
+        PDF files.
+
+    Returns:
+        vectorstore (FAISS): Vectorstore object."""
+
+    # Create embeddings object for OpenAIs.
     embeddings = OpenAIEmbeddings()
 
     # Check if docsearch database already exists.
     if database_exists() and not DEBUG:
         # Load docsearch database.
-        docsearch = FAISS.load_local(VECTOR_DATAFILE, embeddings)
-        return docsearch
-    
+        vectorstore = FAISS.load_local(VECTOR_DATAFILE, embeddings)
+        return vectorstore
+
     # Get PDF files in the directory.
     pdf_files = list(document_dir.glob("*.pdf"))
 
     # Extract text from PDF files.
-    processed_text = ""
+    processed_text = []
     for pdf_file in pdf_files:
-        raw_text = extract_text_from_file(pdf_file)
-        # Use spacy to extract sentences.
-        # processed_text += spacy_sentence_splitter(raw_text)
-        processed_text += raw_text
-
-    # TODO: Word document text extraction.
-    # Clean text.
-    processed_text = clean_text(processed_text)
-
-    # # Split text by paragraph with overlap.
-    text_splitter = RecursiveCharacterTextSplitter (
-        chunk_size=1000,
-        chunk_overlap=200,
-    )
-
-    # Split text into chunks.
-    texts = text_splitter.split_text(processed_text)
+        logging.info(f"Processing {pdf_file}")
+        splits = extract_text_from_file(pdf_file)
+        processed_text.extend(splits)
 
     # Download embeddings from OpenAI.
-    docsearch = FAISS.from_texts(texts, embeddings)
-
-    # Save docsearch database.
-    docsearch.save_local(VECTOR_DATAFILE)
-
-    return docsearch
-
-
-def query_api(query_input, docsearch) -> str:
-    """Query API."""
-
-    # Create chain.
-    chain = load_qa_chain(
-        OpenAI(),
-        chain_type="stuff"
+    vectorstore = FAISS.from_documents(
+        documents=processed_text,
+        embedding=embeddings
     )
 
-    # Search for similar split elements of text.
-    n_similar_texts = 5
-    docs = docsearch.similarity_search(query_input, n_similar_texts)
+    # Save docsearch database.
+    vectorstore.save_local(VECTOR_DATAFILE)
+    return vectorstore
+
+
+def query_api(question, vectorstore) -> str:
+    """Query the API.
+
+    Args:
+        question (str): Question to ask.
+        vectorstore (FAISS): Vectorstore object.
+
+    Returns:
+        response (str): Response to the question."""
+    # Setup vectorstore retriever with nearest 5 documents.
+    N_SIMILAR_TEXTS = 5
+    retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={'k': N_SIMILAR_TEXTS}
+    )
+
+    # Initialise large language model.
+    llm = ChatOpenAI(
+        model_name="gpt-3.5-turbo-1106",
+        temperature=0,
+        openai_api_key=openai_api_key
+    )
+
+    # Define the prompt.
+    TEMPLATE = textwrap.dedent("""
+        You are a helpful assistant to retrieve information from 2FTS
+        documentation on the Viking glider.
+        Answer the question and show where to find the answer
+        including the document name and section in the documentation.
+        Do not include index number. Documentation is below:
+        -----
+        {context}
+        -----
+
+        Question: {question}
+    """)
+    prompt = ChatPromptTemplate.from_template(TEMPLATE)
+
+    rag_chain = (
+        {"context": retriever,
+         "question": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
 
     # Query the LLM to make sense of the related elements of text.
-    response = chain.run(input_documents=docs, question=query_input)
+    response = rag_chain.invoke(question)
     return response
 
 
@@ -132,9 +176,11 @@ if __name__ == '__main__':
         document_dir = DEFAULT_DATA_DIR
 
     # Create docsearch database.
-    docsearch = create_docsearch(DEFAULT_DATA_DIR)
+    docsearch = create_vectorstore(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(query_input="Where do I find how to write a quarterly summary?", 
-                        docsearch=docsearch)
+    response = query_api(
+        question="Where do I find how to write a quarterly summary?",
+        vectorstore=docsearch
+    )
     logging.info(response)
