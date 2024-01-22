@@ -1,7 +1,8 @@
 # streamlit_app.py - GUI for chatbot.
 
+import textwrap
 import streamlit as st
-from api import create_docsearch, query_api, \
+from api import create_vectorstore, query_api, \
                 PROMPT_PREAMBLE, database_exists
 
 
@@ -17,9 +18,14 @@ def fetch_response(prompt):
         # Check if docsearch variable exists.
         if "docsearch" not in st.session_state:
             if not database_exists():
-                st.write("Generating a new vector database...")
+                st.write(textwrap.dedent(
+                        """
+                        Generating a new vector database
+                         (this will take a while)...
+                        """
+                ).replace("\n", ""))
             # Create or fetch docsearch database.
-            st.session_state.docsearch = create_docsearch()
+            st.session_state.docsearch = create_vectorstore()
 
         # Query VGS bot and display the response.
         st.write("Querying VGS Bot...")
@@ -44,12 +50,10 @@ def form_prompt_with_context(user_input, chat_history):
         user_history = "\n".join(user_history)
         context = f"""
             Previous questions for context:
-
             ```
             {user_history}
             ```
-
-            New question:\n"""
+            New question: """
     else:
         context = ""
 

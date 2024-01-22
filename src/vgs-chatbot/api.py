@@ -4,12 +4,14 @@ import os
 import logging
 import sys
 import re
+import textwrap
 from pathlib import Path
 
 # Langchain libraries.
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -69,7 +71,7 @@ def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 
-def create_docsearch(document_dir=DEFAULT_DATA_DIR):
+def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     """Create docsearch database from text files."""
 
     # Create embeddings object for OpenAIs.
@@ -89,9 +91,7 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     for pdf_file in pdf_files:
         logging.info(f"Processing {pdf_file}")
         splits = extract_text_from_file(pdf_file)
-        # TODO: Instead of adding just one list element, add the contents of
-        #       the list.
-        processed_text.append(0, splits)
+        processed_text.extend(splits)
 
     # Download embeddings from OpenAI.
     vectorstore = FAISS.from_documents(
@@ -105,7 +105,7 @@ def create_docsearch(document_dir=DEFAULT_DATA_DIR):
     return vectorstore
 
 
-def query_api(prompt, vectorstore) -> str:
+def query_api(question, vectorstore) -> str:
     """Query API."""
     # Setup vectorstore retriever with nearest 5 documents.
     N_SIMILAR_TEXTS = 5
@@ -120,20 +120,31 @@ def query_api(prompt, vectorstore) -> str:
         temperature=0
     )
 
-    # Define the RAG chain.
-    # TODO: Add a parset to include context.
+    # Define the prompt.
+    TEMPLATE = textwrap.dedent("""
+        You are a helpful assistant to retrieve information from 2FTS
+        documentation on the Viking glider.
+        Show where to find the answer including the
+        document name and section in the documentation.
+        Do not include index number. Documentation is below:
+        -----
+        {context}
+        -----
+
+        Question: {question}
+    """)
+    prompt = ChatPromptTemplate.from_template(TEMPLATE)
+
     rag_chain = (
-        {
-            "context": retriever | format_docs,
-            "question": RunnablePassthrough()
-        }
+        {"context": retriever,
+         "question": RunnablePassthrough()}
         | prompt
         | llm
         | StrOutputParser()
     )
 
     # Query the LLM to make sense of the related elements of text.
-    response = rag_chain.invoke(prompt)
+    response = rag_chain.invoke(question)
     return response
 
 
@@ -153,10 +164,11 @@ if __name__ == '__main__':
         document_dir = DEFAULT_DATA_DIR
 
     # Create docsearch database.
-    docsearch = create_docsearch(DEFAULT_DATA_DIR)
+    docsearch = create_vectorstore(DEFAULT_DATA_DIR)
 
     # Query API.
-    response = query_api(prompt="""Where do I find how to write a
-                         quarterly summary?""",
-                         vectorstore=docsearch)
+    response = query_api(
+        question="Where do I find how to write a quarterly summary?",
+        vectorstore=docsearch
+    )
     logging.info(response)
