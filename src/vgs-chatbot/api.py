@@ -13,15 +13,15 @@ Example:
 
 import os
 import logging
-import sys
 import textwrap
 from pathlib import Path
 
 # Langchain libraries.
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import UnstructuredFileLoader
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -30,8 +30,6 @@ from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 DEBUG = False   # Set to True to force docsearch database to be recreated.
 VECTOR_DATAFILE = "vector_database"
 DEFAULT_DATA_DIR = Path(Path(__file__).resolve().parent.parent.parent, "data")
-PROMPT_PREAMBLE = """\nAlso, show me where I can find the answer in
-                the documentation."""
 
 # Retrieve OpenAI API key.
 openai_api_key = os.getenv("OPENAI_API_KEY")
@@ -94,12 +92,12 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     # Extract text from PDF files.
     processed_text = []
     for pdf_file in pdf_files:
-        logging.info(f"Processing {pdf_file}")
+        logging.info("Processing %s", pdf_file)
         splits = extract_text_from_file(pdf_file)
         processed_text.extend(splits)
 
     # Download embeddings from OpenAI.
-    vectorstore = FAISS.from_documents(
+    vectorstore = FAISS.from_documents(  # pylint: disable=no-member
         documents=processed_text,
         embedding=embeddings
     )
@@ -109,20 +107,97 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     return vectorstore
 
 
-def query_api(question, vectorstore) -> str:
+def get_contextualise_chain():
+    """Form a chain .
+    Returns:
+        contextualize_q_chain (Chain): Chain to contextualise
+        the question."""
+    # Define prompt to contextualise the question.
+    contextualise_question_template = """
+    Given a chat history and the latest user question which might
+    reference context in the chat history, formulate a standalone
+    question which can be understood without the chat history.
+    Do NOT answer the question, just reformulate it if needed
+    and otherwise return it as is."""
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+            ("system", contextualise_question_template),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+    ])
+
+    # Define LLM.
+    llm = ChatOpenAI()
+
+    # Form chain to contextualise the question.
+    contextualize_q_chain = contextualize_q_prompt | \
+        llm | StrOutputParser()
+    return contextualize_q_chain
+
+
+def chat_history_to_messages(chat_history: list):
+    """Convert chat history to AIMessage objects.
+
+    Args:
+        chat_history (list)[dict]: List of chat messages.
+
+    Returns:
+        history (list)[AIMessage]: List of AIMessage objects."""
+    history = []
+    for message in chat_history:
+        if message["role"] == "user":
+            human_message = HumanMessage(content=message["content"])
+            history.append(human_message)
+        elif message["role"] == "assistant":
+            ai_message = AIMessage(content=message["content"])
+            history.append(ai_message)
+    return history
+
+
+def contextualised_question(question, chat_history):
+    """Return contextualised question, if chat history exists.
+
+    Args:
+        chat_input (dict): User input.
+
+    Returns:
+        question_from_context (str): Contextualised question."""
+    # Get chat history.
+    if chat_history:
+        # Contextualise the question as a chain.
+        context_chain = get_contextualise_chain()
+
+        # Convert chat history to AIMessage objects.
+        history = chat_history_to_messages(chat_history)
+
+        # Get chat history
+        question_from_context = context_chain.invoke(
+            {
+                "chat_history": history,
+                "question": question,
+            },
+        )
+    else:
+        # No chat history, so return the question as is.
+        question_from_context = question
+
+    return question_from_context
+
+
+def query_api(question, vectorstore, chat_history) -> str:
     """Query the API.
 
     Args:
         question (str): Question to ask.
         vectorstore (FAISS): Vectorstore object.
+        chat_history (list)[dict]: List of chat messages.
 
     Returns:
         response (str): Response to the question."""
-    # Setup vectorstore retriever with nearest 5 documents.
-    N_SIMILAR_TEXTS = 5
+    # Setup vectorstore retriever with nearest 3 documents.
+    n_similar_texts = 3
     retriever = vectorstore.as_retriever(
         search_type="similarity",
-        search_kwargs={'k': N_SIMILAR_TEXTS}
+        search_kwargs={'k': n_similar_texts}
     )
 
     # Initialise large language model.
@@ -132,20 +207,27 @@ def query_api(question, vectorstore) -> str:
         openai_api_key=openai_api_key
     )
 
+    # Contextualise the question based on the chat history.
+    question = contextualised_question(question, chat_history)
+
     # Define the prompt.
-    TEMPLATE = textwrap.dedent("""
+    template = textwrap.dedent("""
         You are a helpful assistant to retrieve information from 2FTS
         documentation on the Viking glider.
         Answer the question and show where to find the answer
         including the document name and section in the documentation.
-        Do not include index number. Documentation is below:
+        Do not include page number. The Duty Holder Orders (DHOs)
+        the master document. All others are extensions, with the
+        exception of the Group Air Staff Orders (GASOs).
+        Documentation is below:
         -----
         {context}
         -----
 
         Question: {question}
+        Helpful answer, source, and section:
     """)
-    prompt = ChatPromptTemplate.from_template(TEMPLATE)
+    prompt = ChatPromptTemplate.from_template(template)
 
     rag_chain = (
         {"context": retriever,
@@ -156,8 +238,8 @@ def query_api(question, vectorstore) -> str:
     )
 
     # Query the LLM to make sense of the related elements of text.
-    response = rag_chain.invoke(question)
-    return response
+    chain_response = rag_chain.invoke(question)
+    return chain_response
 
 
 if __name__ == '__main__':
@@ -167,20 +249,18 @@ if __name__ == '__main__':
     # Set up debug when called as the main file.
     DEBUG = True
 
-    # Get directory where the PDF files are stored.
-    if len(sys.argv) > 1:
-        # Command line argument.
-        document_dir = Path(sys.argv[1])
-    else:
-        # Default (no command line arguments passed).
-        document_dir = DEFAULT_DATA_DIR
-
     # Create docsearch database.
     docsearch = create_vectorstore(DEFAULT_DATA_DIR)
 
     # Query API.
+    conversation_history = [
+        {"role": "user", "content": "What is a quarterly summary?"},
+        {"role": "assistant", "content": """A quarterly summary is a summary
+         of the quarterly activities."""}
+    ]
     response = query_api(
         question="Where do I find how to write a quarterly summary?",
-        vectorstore=docsearch
+        vectorstore=docsearch,
+        chat_history=conversation_history
     )
     logging.info(response)
