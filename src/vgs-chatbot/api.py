@@ -216,7 +216,10 @@ def query_api(question, vectorstore, chat_history) -> str:
         documentation on the Viking glider.
         Answer the question and show where to find the answer
         including the document name and section in the documentation.
-        Do not include index number. Documentation is below:
+        Do not include page number. The Duty Holder Orders (DHOs)
+        the master document. All others are extensions, with the
+        exception of the Group Air Staff Orders (GASOs).
+        Documentation is below:
         -----
         {context}
         -----
