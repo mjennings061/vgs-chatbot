@@ -19,6 +19,7 @@ from pathlib import Path
 # Langchain libraries.
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_core.runnables import RunnablePassthrough
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.document_loaders import UnstructuredFileLoader
@@ -106,22 +107,80 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     return vectorstore
 
 
-def form_prompt_with_context(user_input, chat_history):
-    """Form prompt with the entire conversation history as context."""
-    # Get all comments from the user in the chat history.
-    user_history = [
-        message["content"]
-        for message in chat_history if message["role"] == "user"
-    ]
+def get_contextualise_chain():
+    """Form a chain .
+    Returns:
+        contextualize_q_chain (Chain): Chain to contextualise
+        the question."""
+    # Define prompt to contextualise the question.
+    contextualise_question_template = """
+    Given a chat history and the latest user question which might
+    reference context in the chat history, formulate a standalone
+    question which can be understood without the chat history.
+    Do NOT answer the question, just reformulate it if needed
+    and otherwise return it as is."""
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+            ("system", contextualise_question_template),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{question}"),
+    ])
 
-    # Use MessagesPlaceholder() to include user history as context.
-    prompt = ChatPromptTemplate(
-        user_input,
-        MessagesPlaceholder(user_history),
-        prompt_preamble="Previous questions for context:\n"
-    )
+    # Define LLM.
+    llm = ChatOpenAI()
 
-    return prompt
+    # Form chain to contextualise the question.
+    contextualize_q_chain = contextualize_q_prompt | \
+        llm | StrOutputParser()
+    return contextualize_q_chain
+
+
+def chat_history_to_messages(chat_history: list):
+    """Convert chat history to AIMessage objects.
+
+    Args:
+        chat_history (list)[dict]: List of chat messages.
+
+    Returns:
+        history (list)[AIMessage]: List of AIMessage objects."""
+    history = []
+    for message in chat_history:
+        if message["role"] == "user":
+            human_message = HumanMessage(content=message["content"])
+            history.append(human_message)
+        elif message["role"] == "assistant":
+            ai_message = AIMessage(content=message["content"])
+            history.append(ai_message)
+    return history
+
+
+def contextualised_question(question, chat_history):
+    """Return contextualised question, if chat history exists.
+
+    Args:
+        chat_input (dict): User input.
+
+    Returns:
+        question_from_context (str): Contextualised question."""
+    # Get chat history.
+    if chat_history:
+        # Contextualise the question as a chain.
+        context_chain = get_contextualise_chain()
+
+        # Convert chat history to AIMessage objects.
+        history = chat_history_to_messages(chat_history)
+
+        # Get chat history
+        question_from_context = context_chain.invoke(
+            {
+                "chat_history": history,
+                "question": question,
+            },
+        )
+    else:
+        # No chat history, so return the question as is.
+        question_from_context = question
+
+    return question_from_context
 
 
 def query_api(question, vectorstore, chat_history) -> str:
@@ -148,9 +207,8 @@ def query_api(question, vectorstore, chat_history) -> str:
         openai_api_key=openai_api_key
     )
 
-    if chat_history:
-        # Add prompt preamble and contextualise question.
-        question = form_prompt_with_context(question, chat_history)
+    # Contextualise the question based on the chat history.
+    question = contextualised_question(question, chat_history)
 
     # Define the prompt.
     template = textwrap.dedent("""
@@ -164,6 +222,7 @@ def query_api(question, vectorstore, chat_history) -> str:
         -----
 
         Question: {question}
+        Helpful answer, source, and section:
     """)
     prompt = ChatPromptTemplate.from_template(template)
 
