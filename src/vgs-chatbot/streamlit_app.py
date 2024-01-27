@@ -1,8 +1,12 @@
-# streamlit_app.py - GUI for chatbot.
+""" streamlit_app.py - GUI for chatbot.
+
+Example:
+    streamlit run src/vgs-chatbot/streamlit_app.py
+"""
 
 import streamlit as st
 from api import create_vectorstore, query_api, \
-                form_prompt_with_context, database_exists
+                database_exists  # pylint: disable=import-error
 
 
 def fetch_response(prompt, chat_history):

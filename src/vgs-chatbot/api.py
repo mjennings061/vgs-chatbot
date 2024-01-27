@@ -13,7 +13,6 @@ Example:
 
 import os
 import logging
-import sys
 import textwrap
 from pathlib import Path
 
@@ -92,12 +91,12 @@ def create_vectorstore(document_dir=DEFAULT_DATA_DIR):
     # Extract text from PDF files.
     processed_text = []
     for pdf_file in pdf_files:
-        logging.info(f"Processing {pdf_file}")
+        logging.info("Processing %s", pdf_file)
         splits = extract_text_from_file(pdf_file)
         processed_text.extend(splits)
 
     # Download embeddings from OpenAI.
-    vectorstore = FAISS.from_documents(
+    vectorstore = FAISS.from_documents(  # pylint: disable=no-member
         documents=processed_text,
         embedding=embeddings
     )
@@ -115,23 +114,13 @@ def form_prompt_with_context(user_input, chat_history):
         for message in chat_history if message["role"] == "user"
     ]
 
-    # TODO: Update this to use the MessagesPlaceholder() prompt.
-    # https://python.langchain.com/docs/use_cases/question_answering/chat_history
+    # Use MessagesPlaceholder() to include user history as context.
+    prompt = ChatPromptTemplate(
+        user_input,
+        MessagesPlaceholder(user_history),
+        prompt_preamble="Previous questions for context:\n"
+    )
 
-    # Join user history into a single string.
-    if len(user_history) > 0:
-        user_history = "\n".join(user_history)
-        context = f"""
-            Previous questions for context:
-            ```
-            {user_history}
-            ```
-            New question: """
-    else:
-        context = ""
-
-    # Add the new user input and prompt preamble.
-    prompt = f"{context}{user_input}"
     return prompt
 
 
@@ -145,11 +134,11 @@ def query_api(question, vectorstore, chat_history) -> str:
 
     Returns:
         response (str): Response to the question."""
-    # Setup vectorstore retriever with nearest 5 documents.
-    N_SIMILAR_TEXTS = 5
+    # Setup vectorstore retriever with nearest 3 documents.
+    n_similar_texts = 3
     retriever = vectorstore.as_retriever(
         search_type="similarity",
-        search_kwargs={'k': N_SIMILAR_TEXTS}
+        search_kwargs={'k': n_similar_texts}
     )
 
     # Initialise large language model.
@@ -164,7 +153,7 @@ def query_api(question, vectorstore, chat_history) -> str:
         question = form_prompt_with_context(question, chat_history)
 
     # Define the prompt.
-    TEMPLATE = textwrap.dedent("""
+    template = textwrap.dedent("""
         You are a helpful assistant to retrieve information from 2FTS
         documentation on the Viking glider.
         Answer the question and show where to find the answer
@@ -176,7 +165,7 @@ def query_api(question, vectorstore, chat_history) -> str:
 
         Question: {question}
     """)
-    prompt = ChatPromptTemplate.from_template(TEMPLATE)
+    prompt = ChatPromptTemplate.from_template(template)
 
     rag_chain = (
         {"context": retriever,
@@ -187,8 +176,8 @@ def query_api(question, vectorstore, chat_history) -> str:
     )
 
     # Query the LLM to make sense of the related elements of text.
-    response = rag_chain.invoke(question)
-    return response
+    chain_response = rag_chain.invoke(question)
+    return chain_response
 
 
 if __name__ == '__main__':
@@ -198,19 +187,11 @@ if __name__ == '__main__':
     # Set up debug when called as the main file.
     DEBUG = True
 
-    # Get directory where the PDF files are stored.
-    if len(sys.argv) > 1:
-        # Command line argument.
-        document_dir = Path(sys.argv[1])
-    else:
-        # Default (no command line arguments passed).
-        document_dir = DEFAULT_DATA_DIR
-
     # Create docsearch database.
     docsearch = create_vectorstore(DEFAULT_DATA_DIR)
 
     # Query API.
-    chat_history = [
+    conversation_history = [
         {"role": "user", "content": "What is a quarterly summary?"},
         {"role": "assistant", "content": """A quarterly summary is a summary
          of the quarterly activities."""}
@@ -218,6 +199,6 @@ if __name__ == '__main__':
     response = query_api(
         question="Where do I find how to write a quarterly summary?",
         vectorstore=docsearch,
-        chat_history=chat_history
+        chat_history=conversation_history
     )
     logging.info(response)
