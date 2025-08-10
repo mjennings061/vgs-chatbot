@@ -125,7 +125,7 @@ WORKDIR /app
 COPY pyproject.toml poetry.lock ./
 RUN pip install poetry && poetry install --no-dev
 COPY src/ ./src/
-CMD ["poetry", "run", "streamlit", "run", "src/vgs_chatbot/dashboard/app.py"]
+CMD ["poetry", "run", "streamlit", "run", "vgs_chatbot/gui/app.py"]
 ```
 
 ## SharePoint Integration Notes

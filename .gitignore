@@ -8,6 +8,13 @@ secret.key
 # Vector database.
 vector_database/
 
+# ChromaDB
+chroma.sqlite3
+chroma/
+
+# Docker
+.dockerignore
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
