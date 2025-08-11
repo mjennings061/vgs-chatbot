@@ -4,18 +4,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-VGS-Chatbot is being completely refactored to create a modern, locally-hosted chatbot that connects to SharePoint to access 2FTS documentation. The new architecture will use SOLID design principles and modern Python frameworks.
+VGS-Chatbot is a modern, locally-hosted chatbot that accesses 2FTS documentation uploaded by administrators. The architecture uses SOLID design principles and modern Python frameworks with GPT-4o-mini for intelligent responses.
 
-## Refactoring Goals
+## Current Implementation Status
 
-**Complete rewrite** of the existing codebase to implement:
+✅ **Completed Features:**
 
-- SharePoint integration for document access via user login (no admin/domain requirements)
+- Document upload and management system for administrators
 - Modern Python architecture following SOLID principles
-- Local PostgreSQL database for user authentication
-- GUI dashboard application using a simple UI framework
+- GUI dashboard application using Streamlit
+- GPT-4o-mini integration for intelligent responses
+- Local file-based document storage with RAG pipeline
+- Source references with section titles and page numbers
+- MOD email domain authentication
+- Admin/user role separation
+
+🔄 **In Progress:**
+
+- Document search and retrieval optimization
+- Vector database improvements for better context matching
+
+❌ **Not Yet Implemented:**
+
+- Local PostgreSQL database for user authentication (currently simplified)
 - Docker containerisation capability
-- Professional code quality standards
 
 ## Architecture Requirements
 
@@ -29,11 +41,20 @@ VGS-Chatbot is being completely refactored to create a modern, locally-hosted ch
 
 **Key Components:**
 
-1. **Authentication Service**: PostgreSQL-backed user login system
-2. **SharePoint Connector**: Document access via configurable URL list
-3. **Document Processor**: RAG pipeline for document indexing and search
-4. **Chat Service**: LLM-powered question answering
-5. **Web Interface**: Chatbot application using simple UI framework
+1. **Authentication Service**: MOD email domain validation with admin credentials
+2. **Document Management**: Admin-uploaded document storage in local filesystem
+3. **Document Processor**: RAG pipeline with ChromaDB for document indexing
+4. **Chat Service**: GPT-4o-mini powered question answering with source references
+5. **Web Interface**: Streamlit-based chatbot application
+
+**Current Technical Stack:**
+
+- **Frontend**: Streamlit web application
+- **Backend**: Python with async support
+- **LLM**: GPT-4o-mini via LangChain
+- **Vector Database**: ChromaDB for document embeddings
+- **Document Processing**: PyPDF, python-docx for text extraction
+- **Authentication**: Simple credential-based (no database yet)
 
 ## Development Commands
 
@@ -43,14 +64,12 @@ VGS-Chatbot is being completely refactored to create a modern, locally-hosted ch
 # Install Poetry (if not available)
 curl -sSL https://install.python-poetry.org | python3 -
 
-# Initialize new Poetry project
-poetry init
-
 # Install dependencies
 poetry install
 
 # Activate virtual environment
-poetry shell
+eval "$(poetry env activate)"
+
 ```
 
 **Code Quality Tools:**
@@ -69,8 +88,8 @@ poetry run ruff check --fix src/ tests/
 # Type checking with mypy
 poetry run mypy src/
 
-# Run all quality checks
-poetry run isort src/ tests/ && poetry run ruff check src/ tests/ && poetry run mypy src/
+# Run all quality checks (update paths for current structure)
+poetry run isort vgs_chatbot/ tests/ && poetry run ruff check vgs_chatbot/ tests/ && poetry run mypy vgs_chatbot/
 ```
 
 **Testing:**
@@ -110,7 +129,7 @@ poetry run pytest tests/test_specific.py
 
 - `vgs_chatbot/` - Main application code
   - `gui/` - User interface
-  - `services/` - External service integrations (SharePoint, database)
+  - `services/` - External service integrations (document storage, database)
   - `models/` - Data models and schemas
   - `utils/` - Utility functions
 - `tests/` - Unit and integration tests
@@ -128,17 +147,42 @@ COPY src/ ./src/
 CMD ["poetry", "run", "streamlit", "run", "vgs_chatbot/gui/app.py"]
 ```
 
-## SharePoint Integration Notes
+## Document Management Notes
 
-- No admin/domain requirements, user login only for authentication
-- Handle document directory URLs as configurable list
-- Support multiple SharePoint sites/document libraries
-- Implement proper error handling for authentication failures
-- Use all documents and subdirectories in the specified SharePoint URLs
+- Administrators can upload documents through the admin interface
+- Support multiple document formats (PDF, Word, text files)
+- Documents are stored locally and indexed for search
+- Implement proper error handling for file upload failures
+- All uploaded documents and their content are searchable
 
 ## Testing Strategy
 
 - Minimal unit testing, for function only
-- Integration tests for SharePoint connectivity
+- Integration tests for document upload and storage
 - End-to-end tests for chat functionality
 - Mock external dependencies in tests
+
+## Running the Application
+
+**Start the chatbot:**
+```bash
+poetry run streamlit run vgs_chatbot/gui/app.py
+```
+
+**Access the application:**
+- Admin login: Use credentials from `.env` file (`admin_username`/`admin_password`)
+- User login: Any email ending with `@mod.gov.uk` or `@mod.uk`
+
+**Admin Functions:**
+- Upload PDF, DOCX, XLSX, PPTX, TXT files
+- View document management dashboard
+- Monitor system status
+
+**User Functions:**
+- Chat with uploaded documents
+- Receive AI-generated answers with source references
+- View available documents in sidebar
+
+## Known Issues
+
+See TODO.md for current issues and planned improvements.

@@ -1,46 +1,49 @@
 """Document data models."""
 
 from datetime import datetime
-from typing import List, Optional
 
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel
 
 
 class Document(BaseModel):
     """Raw document model."""
-    
-    id: Optional[str] = None
+
+    id: str | None = None
     name: str
-    url: HttpUrl
+    file_path: str  # Changed from 'url' to 'file_path' for local documents
     file_type: str
-    size: Optional[int] = None
-    modified_date: Optional[datetime] = None
+    size: int | None = None
+    modified_date: datetime | None = None
     directory_path: str
-    
+
+    model_config = {"str_strip_whitespace": True}
+
 
 class ProcessedDocument(BaseModel):
     """Processed document model for RAG."""
-    
+
     id: str
     original_document: Document
     content: str
-    chunks: List[str]
-    embeddings: Optional[List[List[float]]] = None
+    chunks: list[str]
+    embeddings: list[list[float]] | None = None
     metadata: dict = {}
     processed_at: datetime
-    
+
     class Config:
         """Pydantic configuration."""
-        
+
         arbitrary_types_allowed = True
 
 
 class DocumentChunk(BaseModel):
     """Document chunk model."""
-    
+
     id: str
     document_id: str
     chunk_index: int
     content: str
-    embedding: Optional[List[float]] = None
+    section_title: str | None = None
+    page_number: int | None = None
+    embedding: list[float] | None = None
     metadata: dict = {}

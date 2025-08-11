@@ -2,14 +2,21 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import List, Optional
 
 from pydantic import BaseModel
 
 
+class SourceReference(BaseModel):
+    """Source reference model for chat responses."""
+
+    document_name: str
+    section_title: str | None = None
+    page_number: int | None = None
+
+
 class MessageRole(str, Enum):
     """Chat message roles."""
-    
+
     USER = "user"
     ASSISTANT = "assistant"
     SYSTEM = "system"
@@ -17,29 +24,32 @@ class MessageRole(str, Enum):
 
 class ChatMessage(BaseModel):
     """Chat message model."""
-    
-    id: Optional[str] = None
+
+    id: str | None = None
     role: MessageRole
     content: str
     timestamp: datetime
-    user_id: Optional[int] = None
-    
+    user_id: int | None = None
+    sources: list[str] = []
+    source_references: list[SourceReference] = []
+
 
 class ChatResponse(BaseModel):
     """Chat response model."""
-    
+
     message: str
-    sources: List[str] = []
-    confidence: Optional[float] = None
-    processing_time: Optional[float] = None
-    
+    sources: list[str] = []
+    source_references: list[SourceReference] = []
+    confidence: float | None = None
+    processing_time: float | None = None
+
 
 class ChatSession(BaseModel):
     """Chat session model."""
-    
+
     id: str
     user_id: int
-    messages: List[ChatMessage] = []
+    messages: list[ChatMessage] = []
     created_at: datetime
     updated_at: datetime
     is_active: bool = True
