@@ -3,7 +3,7 @@
 import os
 from typing import List
 
-from pydantic import BaseSettings
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -19,13 +19,21 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-3.5-turbo"
     
-    # SharePoint
-    sharepoint_site_url: str = ""
-    sharepoint_directory_urls: List[str] = []
+    # Document Storage
+    documents_dir: str = "data/documents"
+    vectors_dir: str = "data/vectors"
     
     # App
     app_title: str = "VGS Chatbot"
     debug: bool = False
+    
+    # Admin credentials (set via environment variables only)
+    admin_username: str = ""
+    admin_password: str = ""
+    
+    # Test credentials (set via environment variables only)
+    test_username: str = ""
+    test_password: str = ""
     
     class Config:
         """Pydantic configuration."""

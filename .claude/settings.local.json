@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(.venv/bin/python:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(poetry run ruff:*)",
+      "Bash(rm:*)",
+      "Bash(poetry run mypy:*)",
+      "Bash(find:*)",
+      "Bash(true)"
+    ],
+    "deny": []
+  }
+}

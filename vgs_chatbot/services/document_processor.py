@@ -26,9 +26,14 @@ class RAGDocumentProcessor(DocumentProcessorInterface):
         """
         self.embedding_model = SentenceTransformer(embedding_model)
         self.chroma_client = chromadb.Client()
+        # Delete existing collection if it exists to avoid schema conflicts
+        try:
+            self.chroma_client.delete_collection(name="documents")
+        except:
+            pass  # Collection might not exist
+        
         self.collection = self.chroma_client.create_collection(
-            name="documents",
-            get_or_create=True
+            name="documents"
         )
         self.chunk_size = 1000
         self.chunk_overlap = 200
@@ -224,7 +229,7 @@ class RAGDocumentProcessor(DocumentProcessorInterface):
                 id=doc_id,
                 original_document=Document(
                     name="Retrieved Document",
-                    url="https://example.com",
+                    file_path="/search/results/retrieved_document",
                     file_type="text/plain",
                     directory_path="/search/results"
                 ),
