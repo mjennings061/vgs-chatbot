@@ -1000,79 +1000,211 @@ class RAGDocumentProcessor(DocumentProcessorInterface):
         return False
 
     def _split_text_standard(self, text: str) -> list[str]:
-        """Section-based text splitting with enhanced aviation document awareness."""
+        """Section-based text splitting that preserves document structure."""
         chunks = []
 
-        # Enhanced section detection for aviation documents
-        sections = self._identify_aviation_sections(text)
+        # Primary: Identify sections based on document structure
+        sections = self._identify_document_sections(text)
 
-        # If no aviation sections found, fall back to page markers
+        # Fallback 1: Split by page markers if no clear sections
         if len(sections) <= 1:
-            sections = []
-            current_section = ""
+            sections = self._split_by_page_markers(text)
 
-            for line in text.split("\n"):
-                if line.startswith("--- PAGE"):
-                    if current_section.strip():
-                        sections.append(current_section.strip())
-                    current_section = line + "\n"
-                else:
-                    current_section += line + "\n"
-
-            # Add the last section
-            if current_section.strip():
-                sections.append(current_section.strip())
-
-        # If no page sections found, split by double line breaks (paragraphs)
+        # Fallback 2: Split by paragraph breaks
         if len(sections) <= 1:
             sections = [s.strip() for s in text.split("\n\n") if s.strip()]
 
-        # If still no good splits, use the whole text
+        # Final fallback: Use entire text
         if len(sections) <= 1:
             sections = [text.strip()]
 
+        # Process sections with size management
         current_chunk = ""
         for section in sections:
             if not section or section == "[WEATHER_TABLE_REMOVED]":
                 continue
 
-            # Check if adding this section exceeds our chunk size
-            test_chunk = (current_chunk + "\n\n" + section).strip()
+            section_tokens = self._token_count(section)
 
-            if self._token_count(test_chunk) <= self.chunk_target_tokens:
-                current_chunk = test_chunk
+            # If section is small enough, try to combine with previous chunks
+            if current_chunk and self._token_count(current_chunk + "\n\n" + section) <= self.chunk_target_tokens:
+                current_chunk = (current_chunk + "\n\n" + section).strip()
             else:
                 # Save current chunk if it has content
                 if current_chunk.strip():
                     chunks.append(current_chunk.strip())
 
-                # CRITICAL: Never split sections - keep them as complete chunks
-                # Allow sections up to max_tokens, only warn if exceeding that limit
-                section_tokens = self._token_count(section)
+                # Handle oversized sections
                 if section_tokens > self.chunk_max_tokens:
-                    # Only log truly oversized sections
-                    print(
-                        f"Warning: Section exceeds maximum limit ({section_tokens} tokens > {self.chunk_max_tokens}) but keeping intact for section integrity"
-                    )
-
-                # Add section as its own chunk regardless of size
-                chunks.append(section.strip())
-                current_chunk = ""
+                    # Split oversized sections while trying to preserve subsection boundaries
+                    sub_chunks = self._split_oversized_section(section)
+                    chunks.extend(sub_chunks)
+                    current_chunk = ""
+                else:
+                    # Start new chunk with this section
+                    current_chunk = section.strip()
 
         # Add final chunk
         if current_chunk.strip():
             chunks.append(current_chunk.strip())
 
-        # Ensure we have content
-        if not chunks and text.strip():
-            # Final fallback: token-based chunking
-            tokens = self.tokenizer.encode(text)
-            for i in range(0, len(tokens), self.chunk_target_tokens):
-                chunk_tokens = tokens[i : i + self.chunk_target_tokens]
-                chunk_text = self.tokenizer.decode(chunk_tokens)
-                chunks.append(chunk_text)
+        return chunks if chunks else [text.strip()]
 
-        return chunks if chunks else []
+    def _identify_document_sections(self, text: str) -> list[str]:
+        """Identify document sections based on structural patterns.
+        
+        Args:
+            text: Document text to analyze
+            
+        Returns:
+            List of identified sections
+        """
+        lines = text.split("\n")
+        sections = []
+        current_section = ""
+
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+
+            # Skip removed table markers
+            if line_stripped == "[WEATHER_TABLE_REMOVED]":
+                continue
+
+            # Check if this line is a section boundary
+            is_section_boundary = self._is_section_boundary(line_stripped, i, lines)
+
+            if is_section_boundary and current_section.strip():
+                # Save the current section before starting a new one
+                sections.append(current_section.strip())
+                current_section = line + "\n"
+            else:
+                current_section += line + "\n"
+
+        # Add the final section
+        if current_section.strip():
+            sections.append(current_section.strip())
+
+        return sections if sections else []
+
+    def _is_section_boundary(self, line: str, line_idx: int, all_lines: list[str]) -> bool:
+        """Determine if a line represents a section boundary.
+        
+        Args:
+            line: Current line to check
+            line_idx: Index of current line
+            all_lines: All lines in the document
+            
+        Returns:
+            True if this line starts a new section
+        """
+        if not line:
+            return False
+
+        # Page markers
+        if line.startswith("--- PAGE"):
+            return True
+
+        # Enhanced structure headings (=== ... ===)
+        if line.startswith("===") and line.endswith("==="):
+            return True
+
+        # Markdown-style headings
+        if line.startswith("#"):
+            return True
+
+        # Document reference patterns (general)
+        import re
+        section_patterns = [
+            r"^DHO\s+\d+",
+            r"^ANNEX\s+[A-Z]",
+            r"^APPENDIX\s+[A-Z\d]",
+            r"^SECTION\s+\d+",
+            r"^CHAPTER\s+\d+",
+            r"^PART\s+[A-Z\d]",
+        ]
+
+        for pattern in section_patterns:
+            if re.match(pattern, line.upper()):
+                return True
+
+        # All-caps titles that appear to be headings
+        if (line.isupper() and
+            len(line) > 10 and
+            len(line) < 100 and
+            # Make sure this isn't just a sentence in the middle of a paragraph
+            (line_idx == 0 or not all_lines[line_idx - 1].strip())):
+            return True
+
+        return False
+
+    def _split_by_page_markers(self, text: str) -> list[str]:
+        """Split text by page markers as fallback method.
+        
+        Args:
+            text: Text to split
+            
+        Returns:
+            List of page-based sections
+        """
+        sections = []
+        current_section = ""
+
+        for line in text.split("\n"):
+            if line.startswith("--- PAGE"):
+                if current_section.strip():
+                    sections.append(current_section.strip())
+                current_section = line + "\n"
+            else:
+                current_section += line + "\n"
+
+        # Add the last section
+        if current_section.strip():
+            sections.append(current_section.strip())
+
+        return sections
+
+    def _split_oversized_section(self, section: str) -> list[str]:
+        """Split an oversized section while preserving subsection boundaries.
+        
+        Args:
+            section: Section text to split
+            
+        Returns:
+            List of sub-chunks
+        """
+        # Try to split by subsection markers first
+        lines = section.split("\n")
+        sub_chunks = []
+        current_chunk = ""
+
+        for line in lines:
+            line_stripped = line.strip()
+
+            # Check for subsection boundaries
+            is_subsection = (
+                line_stripped.startswith("===") or
+                line_stripped.startswith("#") or
+                (line_stripped.isupper() and len(line_stripped) > 5 and len(line_stripped) < 80)
+            )
+
+            if is_subsection and current_chunk.strip() and self._token_count(current_chunk) > 200:
+                # Save current chunk if it's substantial
+                sub_chunks.append(current_chunk.strip())
+                current_chunk = line + "\n"
+            else:
+                current_chunk += line + "\n"
+
+            # Check if current chunk is getting too large
+            if self._token_count(current_chunk) > self.chunk_target_tokens:
+                if current_chunk.strip():
+                    sub_chunks.append(current_chunk.strip())
+                current_chunk = ""
+
+        # Add final chunk
+        if current_chunk.strip():
+            sub_chunks.append(current_chunk.strip())
+
+        return sub_chunks if sub_chunks else [section]
 
     def _extract_metadata(self, content: str, document_name: str) -> dict[str, Any]:
         """Extract metadata from document content.
@@ -1296,10 +1428,32 @@ class RAGDocumentProcessor(DocumentProcessorInterface):
             query, fused_results, top_k=top_k * 3
         )
 
-        # Use reranked results for final processing
+        # Use reranked results for final processing with DHO prioritization
         enhanced_results = reranked_results[
             : top_k * 2
         ]  # Take top results after reranking
+
+        # Apply structural document type prioritization
+        dho_results = []
+        gaso_results = []
+        other_results = []
+
+        for result in enhanced_results:
+            doc_name = result.get("metadata", {}).get("document_name", "")
+            if "DHO" in doc_name:
+                dho_results.append(result)
+            elif "GASO" in doc_name or "Gp Air Staff" in doc_name:
+                gaso_results.append(result)
+            else:
+                other_results.append(result)
+
+        # Sort each category by score, then combine in priority order
+        dho_results.sort(key=lambda x: x.get("cross_encoder_score", x["rrf_score"]), reverse=True)
+        gaso_results.sort(key=lambda x: x.get("cross_encoder_score", x["rrf_score"]), reverse=True)
+        other_results.sort(key=lambda x: x.get("cross_encoder_score", x["rrf_score"]), reverse=True)
+
+        # Combine in priority order: DHO, GASO, Others
+        enhanced_results = dho_results + gaso_results + other_results
 
         # Group chunks by document and reconstruct ProcessedDocuments
         document_chunks: dict[str, Any] = {}
@@ -1754,7 +1908,7 @@ class RAGDocumentProcessor(DocumentProcessorInterface):
         lines = chunk.split("\n")
 
         # Look for table markers and nearby titles
-        for i, line in enumerate(lines):
+        for line in lines:
             if "table" in line.lower() and (":" in line or len(line.split()) <= 8):
                 return line.strip()
             elif "--- table" in line.lower():
