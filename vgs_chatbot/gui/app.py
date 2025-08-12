@@ -128,6 +128,43 @@ class VGSChatbot:
             st.error(f"Reindexing failed: {str(e)}")
             return False
 
+    def _reindex_changed_documents(self, documents: list[Document]) -> bool:
+        """Reindex only changed documents.
+
+        Args:
+            documents: List of all documents to check for changes
+
+        Returns:
+            bool: True if reindexing was successful, False otherwise
+        """
+        try:
+            import asyncio
+
+            async def process_changed_only():
+                processed_docs = await self.document_processor.process_changed_documents(
+                    documents
+                )
+                if processed_docs:
+                    await self.document_processor.index_documents(processed_docs)
+                return len(processed_docs) > 0
+
+            # Run the async operations
+            success = asyncio.run(process_changed_only())
+            if not success:
+                return False
+
+            # Update the index marker file
+            index_file = self.vectors_dir / ".documents_indexed"
+            index_file.write_text(
+                f"Changed documents reindexed at {datetime.now(UTC)}"
+            )
+
+            return True
+
+        except Exception as e:
+            st.error(f"Changed document reindexing failed: {str(e)}")
+            return False
+
     def are_documents_indexed(self) -> bool:
         """Check if documents have been processed and are ready for chat."""
         # Check if we have any documents at all
@@ -354,20 +391,70 @@ class VGSChatbot:
         indexed_documents = [doc for doc in documents if doc.is_file()]
 
         if indexed_documents:
+            # Show manifest statistics
+            manifest_stats = self.document_processor.get_manifest_stats()
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("📊 Tracked Documents", manifest_stats["total_documents"])
+            with col2:
+                st.metric("📦 Tracked Chunks", manifest_stats["total_chunks"])
+            with col3:
+                model_name = manifest_stats["embedding_model"].split('/')[-1]
+                st.metric("🧠 Model", model_name)
+
             st.write(f"Found {len(indexed_documents)} documents ready for reindexing:")
             for doc in indexed_documents[:5]:  # Show first 5 documents
                 st.write(f"• {doc.name}")
             if len(indexed_documents) > 5:
                 st.write(f"• ... and {len(indexed_documents) - 5} more")
 
-            col1, col2 = st.columns([2, 1])
+            # Check for changed documents
+            doc_objects = []
+            for doc_path in indexed_documents:
+                file_type_map = {
+                    ".pdf": "application/pdf",
+                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    ".txt": "text/plain",
+                }
+                file_type = file_type_map.get(doc_path.suffix.lower(), "application/octet-stream")
+                doc_objects.append(Document(
+                    name=doc_path.name,
+                    file_path=str(doc_path),
+                    file_type=file_type,
+                    directory_path=str(doc_path.parent),
+                ))
+
+            changed_docs = self.document_processor.manifest.get_changed_documents(doc_objects)
+
+            # Show reindex options
+            col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
+                if changed_docs:
+                    st.info(f"💡 **{len(changed_docs)} documents have changed** and can be selectively reindexed.")
+                else:
+                    st.success("✅ All documents are up-to-date with the current index.")
                 st.warning(
-                    "⚠️ **Important**: Reindexing will clear the current search index and rebuild it with improved chunking strategies. This may take a few minutes."
+                    "⚠️ **Full reindex** will clear the current search index and rebuild everything."
                 )
+
             with col2:
+                if changed_docs and st.button("🔄 Reindex Changed Only", type="secondary"):
+                    with st.spinner("Reindexing changed documents..."):
+                        try:
+                            success = self._reindex_changed_documents(doc_objects)
+                            if success:
+                                st.success(f"✅ Successfully reindexed {len(changed_docs)} changed documents!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Failed to reindex changed documents")
+                        except Exception as e:
+                            st.error(f"Error during selective reindexing: {str(e)}")
+
+            with col3:
                 if st.button("🔄 Reindex All Documents", type="primary"):
-                    with st.spinner("Reindexing documents with improved chunking..."):
+                    with st.spinner("Reindexing all documents with improved chunking..."):
                         try:
                             success = self._reindex_all_documents()
                             if success:
@@ -411,10 +498,61 @@ class VGSChatbot:
         doc_count = len([f for f in self.documents_dir.glob("*") if f.is_file()])
         st.metric("📄 Documents", doc_count)
 
+        # Vector Store Health Panel
+        st.subheader("🧮 Vector Store Health Panel")
+        try:
+            # Get collection statistics
+            collection = self.document_processor.collection
+            total_chunks = collection.count()
+
+            if total_chunks == 0:
+                st.warning("⚠️ **Vector store is empty** - No documents indexed yet")
+            else:
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.metric("📦 Total Chunks", total_chunks)
+
+                with col2:
+                    # Count distinct documents by querying a sample and extracting unique document names
+                    try:
+                        sample_results = collection.query(
+                            query_texts=["sample query"],
+                            n_results=min(total_chunks, 100)  # Sample up to 100 chunks
+                        )
+                        distinct_docs = set()
+                        metadatas_list = sample_results.get("metadatas")
+                        if metadatas_list and len(metadatas_list) > 0 and metadatas_list[0]:
+                            for metadata in metadatas_list[0]:
+                                if metadata and metadata.get("document_name"):
+                                    distinct_docs.add(metadata["document_name"])
+                        st.metric("📋 Distinct Documents", len(distinct_docs))
+                    except Exception:
+                        st.metric("📋 Distinct Documents", "Unknown")
+
+                with col3:
+                    # Get embedding model info
+                    embedding_model = getattr(self.document_processor, 'embedding_model', None)
+                    if embedding_model and hasattr(embedding_model, 'get_sentence_transformer'):
+                        model_name = embedding_model.get_sentence_transformer().get_model_card().model_name or "multi-qa-MiniLM-L6-cos-v1"
+                    else:
+                        model_name = "multi-qa-MiniLM-L6-cos-v1"
+                    st.metric("🧠 Embedding Model", model_name.split('/')[-1])
+
+                # Last index time
+                index_file = self.vectors_dir / ".documents_indexed"
+                if index_file.exists():
+                    index_content = index_file.read_text()
+                    st.success("✅ Vector database indexed and ready")
+                    st.caption(f"Last indexed: {index_content.split('at ')[-1] if 'at ' in index_content else 'Unknown'}")
+                else:
+                    st.info("📊 Vector database operational (no index timestamp)")
+
+        except Exception as e:
+            st.error(f"❌ Error accessing vector store: {str(e)}")
+
         # Vector database status
         if self.are_documents_indexed():
-            st.success("✅ Vector database is indexed and ready")
-
             # Check if documents have been reindexed with improved chunking
             index_file = self.vectors_dir / ".documents_indexed"
             if index_file.exists():
@@ -438,8 +576,10 @@ class VGSChatbot:
             st.warning("⚠️ No documents indexed yet")
 
         # OpenAI status
+        st.subheader("🤖 AI Service Status")
         if self.settings.openai_api_key and self.settings.openai_api_key != "":
             st.success("✅ OpenAI API configured")
+            st.metric("🎯 Model", self.settings.openai_model)
         else:
             st.error("❌ OpenAI API key not configured")
 
