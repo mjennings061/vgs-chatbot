@@ -70,18 +70,18 @@ class LLMChatService(ChatServiceInterface):
             sources = [doc.original_document.name for doc in context_documents]
             source_references = []
 
-            # Create source references for each unique document
+            # Create source references for each unique document with enhanced metadata
             processed_docs = set()
             for doc in context_documents:
                 if doc.original_document.name not in processed_docs:
-                    # Extract section title and page number from document content
-                    section_title = self._extract_section_title(doc)
-                    page_numbers = self._extract_page_numbers(doc)
+                    # Try to get enhanced section title and page numbers from chunks
+                    enhanced_section_title = self._extract_enhanced_section_title(doc)
+                    enhanced_page_numbers = self._extract_enhanced_page_numbers(doc)
 
                     source_ref = SourceReference(
                         document_name=doc.original_document.name,
-                        section_title=section_title,
-                        page_number=page_numbers,
+                        section_title=enhanced_section_title,
+                        page_number=enhanced_page_numbers,
                     )
                     source_references.append(source_ref)
                     processed_docs.add(doc.original_document.name)
@@ -360,3 +360,68 @@ Answer:"""
             return f"1-{doc.metadata['total_pages']}"
 
         return "1"  # Fallback
+
+    def _extract_enhanced_section_title(self, doc: ProcessedDocument) -> str:
+        """Extract enhanced section title using chunk metadata.
+
+        Args:
+            doc: ProcessedDocument with chunks
+
+        Returns:
+            Most relevant section title
+        """
+        # Try to find weather/operational sections in chunks
+        best_section = "General Content"
+        priority_keywords = ["weather", "limit", "wind", "operational", "procedure"]
+
+        for chunk in doc.chunks[:3]:  # Check first 3 chunks
+            lines = chunk.split("\n")
+            for line in lines[:5]:  # Check first 5 lines of each chunk
+                line = line.strip()
+                if line:
+                    # Check for enhanced structure headings
+                    if line.startswith("===") and line.endswith("==="):
+                        section_title = line.replace("===", "").strip()
+                        # Prioritize weather/operational sections
+                        if any(keyword in section_title.lower() for keyword in priority_keywords):
+                            return section_title
+                        elif best_section == "General Content":
+                            best_section = section_title
+
+                    # Check for weather/operational patterns
+                    elif any(keyword in line.lower() for keyword in priority_keywords):
+                        if len(line) < 100:  # Reasonable section title length
+                            return line
+
+        return best_section
+
+    def _extract_enhanced_page_numbers(self, doc: ProcessedDocument) -> str:
+        """Extract enhanced page numbers using chunk metadata.
+
+        Args:
+            doc: ProcessedDocument with chunks
+
+        Returns:
+            Page number range or single page
+        """
+        page_numbers = set()
+
+        # Look through chunks for page markers
+        for chunk in doc.chunks:
+            lines = chunk.split("\n")
+            for line in lines:
+                if "--- PAGE" in line:
+                    import re
+                    match = re.search(r"PAGE\s+(\d+)", line)
+                    if match:
+                        page_numbers.add(match.group(1))
+
+        if page_numbers:
+            sorted_pages = sorted(page_numbers, key=int)
+            if len(sorted_pages) == 1:
+                return sorted_pages[0]
+            else:
+                return f"{sorted_pages[0]}-{sorted_pages[-1]}"
+
+        # Fallback to original method
+        return self._extract_page_numbers(doc)

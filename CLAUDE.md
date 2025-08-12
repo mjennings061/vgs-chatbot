@@ -186,3 +186,4 @@ poetry run streamlit run vgs_chatbot/gui/app.py
 ## Important memories
 - Always test the chat returns the correct response to a question with a known answer e.g. "What are the wind limits" should contain "knots", "kt", "kts" or similar in the answer
 - Pilots are split by category, with U/T the junior, and A categories being the highest e.g A2 or A1, including flying supervisors A2* or A1*
+- Documents should be chunked by section to maintain integrity of information
