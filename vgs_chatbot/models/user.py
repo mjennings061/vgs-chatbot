@@ -1,8 +1,7 @@
 """User data models."""
 
 from datetime import datetime
-from typing import Optional
-from uuid import uuid4, UUID
+from uuid import UUID, uuid4
 
 from pydantic import BaseModel, EmailStr
 

@@ -1,7 +1,8 @@
 """Tests for SharePoint connector."""
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from vgs_chatbot.services.sharepoint_connector import SharePointConnector
 
@@ -16,15 +17,15 @@ def sharepoint_connector():
 async def test_connect_success(sharepoint_connector):
     """Test successful SharePoint connection."""
     with patch('vgs_chatbot.services.sharepoint_connector.AuthenticationContext') as mock_auth, \
-         patch('vgs_chatbot.services.sharepoint_connector.ClientContext') as mock_client:
-        
+         patch('vgs_chatbot.services.sharepoint_connector.ClientContext'):
+
         # Arrange
         mock_auth_instance = mock_auth.return_value
         mock_auth_instance.acquire_token_for_user.return_value = True
-        
+
         # Act
         result = await sharepoint_connector.connect("testuser", "password")
-        
+
         # Assert
         assert result is True
         assert sharepoint_connector.is_connected is True
@@ -34,14 +35,14 @@ async def test_connect_success(sharepoint_connector):
 async def test_connect_failure(sharepoint_connector):
     """Test failed SharePoint connection."""
     with patch('vgs_chatbot.services.sharepoint_connector.AuthenticationContext') as mock_auth:
-        
+
         # Arrange
         mock_auth_instance = mock_auth.return_value
         mock_auth_instance.acquire_token_for_user.return_value = False
-        
+
         # Act
         result = await sharepoint_connector.connect("testuser", "wrongpassword")
-        
+
         # Assert
         assert result is False
         assert sharepoint_connector.is_connected is False
@@ -60,10 +61,10 @@ async def test_disconnect(sharepoint_connector):
     # Arrange
     sharepoint_connector.is_connected = True
     sharepoint_connector.client_context = MagicMock()
-    
+
     # Act
     await sharepoint_connector.disconnect()
-    
+
     # Assert
     assert sharepoint_connector.client_context is None
     assert sharepoint_connector.is_connected is False

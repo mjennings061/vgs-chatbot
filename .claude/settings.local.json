@@ -8,7 +8,17 @@
       "Bash(rm:*)",
       "Bash(poetry run mypy:*)",
       "Bash(find:*)",
-      "Bash(true)"
+      "Bash(true)",
+      "Bash(poetry run pytest:*)",
+      "Bash(poetry add:*)",
+      "Bash(if [ -n \"$OPENAI_API_KEY\" ])",
+      "Bash(then echo \"API key available\")",
+      "Bash(else echo \"No API key set\")",
+      "Bash(fi)",
+      "Bash(python:*)",
+      "Bash(poetry run python:*)",
+      "Bash(poetry run isort:*)",
+      "Bash(poetry run streamlit run:*)"
     ],
     "deny": []
   }
