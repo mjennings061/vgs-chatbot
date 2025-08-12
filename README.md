@@ -109,6 +109,81 @@ Key environment variables in `.env`:
 3. **Chat**: Ask questions about your documentation
 4. **View Sources**: See which documents were used to generate responses
 
+## Reprocessing & Reindexing Documents (CLI)
+
+After changing the embedding model, chunking logic, or wanting a clean rebuild of the vector store, you can regenerate all embeddings via the built‑in CLI in `vgs_chatbot/services/document_processor.py`.
+
+This script:
+
+- Deletes the existing Chroma persistent index directory you point it at (if it exists)
+- Scans a documents directory for supported files (PDF, DOCX, XLSX, TXT, MD, etc.)
+- Extracts text, chunks content, generates embeddings with the selected model
+- Rebuilds the Chroma collection from scratch
+
+### When to run it
+
+- After changing the default embedding model (e.g. switching to `multi-qa-MiniLM-L6-cos-v1`)
+- After modifying chunking / extraction logic
+- If the index becomes corrupted or stale
+- Before benchmarking retrieval performance
+
+### Basic usage
+
+```bash
+poetry run python vgs_chatbot/services/document_processor.py \
+   --documents-dir data/documents \
+   --persist-dir data/vectors/chroma \
+   --embedding-model multi-qa-MiniLM-L6-cos-v1
+```
+
+### Arguments
+
+- `--documents-dir`  Path containing source documents (default: `data/documents`)
+- `--persist-dir`    Path for Chroma persistent store (default: `data/vectors/chroma`)
+- `--embedding-model` SentenceTransformer model name (default: `multi-qa-MiniLM-L6-cos-v1`)
+
+### Notes & Safety
+
+- The script removes the existing directory at `--persist-dir` before rebuilding. Backup if needed.
+- Non-supported file types are skipped gracefully.
+- Large Excel sheets are truncated after 100 data rows per sheet to control index size.
+- Progress / warnings are printed to stdout; consider redirecting to a log file for automation.
+
+### Example (fresh rebuild after model change)
+
+```bash
+poetry run python vgs_chatbot/services/document_processor.py \
+   --embedding-model all-mpnet-base-v2 \
+   --documents-dir /path/to/new_docs \
+   --persist-dir data/vectors/chroma
+```
+
+### Automating (Makefile snippet)
+
+Add to a `Makefile` if desired:
+
+```makefile
+reindex:
+   poetry run python vgs_chatbot/services/document_processor.py \
+      --documents-dir data/documents \
+      --persist-dir data/vectors/chroma \
+      --embedding-model multi-qa-MiniLM-L6-cos-v1
+```
+
+Then run:
+
+```bash
+make reindex
+```
+
+If you use Docker, you can execute inside the container (ensure volumes are mounted):
+
+```bash
+docker compose exec app poetry run python vgs_chatbot/services/document_processor.py \
+   --documents-dir /app/data/documents \
+   --persist-dir /app/data/vectors/chroma
+```
+
 ## Development
 
 ### Code Quality

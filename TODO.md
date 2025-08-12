@@ -160,3 +160,220 @@
 - End-to-end testing of document upload → processing → chat flow
 - Test with various document types and query patterns
 - Performance testing with larger document sets
+
+---
+
+## 📌 Bookmarked Next Steps (Added 2025-08-12)
+
+These are the immediate, high-impact follow‑ups after eliminating per‑query re‑embedding and adding persistent vector storage.
+
+### ✅ Recently Completed
+- Stopped redundant embedding regeneration on each user query
+- Introduced persistent Chroma collection (streamlit session + disk)
+- Centralized processing at upload + explicit reindex
+
+### 🎯 Immediate Next Steps (High Value / Low Risk)
+1. Vector Store Health Panel
+	- Display: total chunks, distinct documents, last index time, embedding model name
+	- Warn if collection.count() == 0
+2. Duplicate / Stale Protection
+	- Maintain manifest (JSON) with file hash (SHA256), size, mtime -> only re-embed on change
+	- Provide "Reindex changed only" option
+3. Retrieval Quality Enhancements
+	- Add simple keyword boost (hybrid: semantic score + token overlap)
+	- Synonym map: {"gs": "gliding scholarship", "u/t": "under training"}
+4. Source Reference Enrichment
+	- Store page numbers & section titles in chunk metadata during indexing
+5. Safety / Validation
+	- Skip empty chunks; log count of discarded empties
+	- Enforce max chunk size guard (e.g. 2k tokens) before embedding
+
+### 🧪 Testing To Add
+- Unit: hash manifest logic; selective reindex function
+- Integration: upload → modify file → ensure only changed doc reindexed
+- Retrieval: query wind limits returns weather table chunk as first result
+
+### 📄 Proposed Manifest Structure (vectors/manifest.json)
+```jsonc
+{
+  "embedding_model": "all-MiniLM-L6-v2",
+  "last_full_reindex": "2025-08-12T12:34:56Z",
+  "documents": {
+	 "20241201-2 FTS DHOs Issue 3.pdf": {
+		"sha256": "<hash>",
+		"size": 123456,
+		"mtime": 1711234567,
+		"chunk_count": 119,
+		"last_indexed": "2025-08-12T12:34:56Z"
+	 }
+  }
+}
+```
+
+### 🔄 Selective Reindex Pseudocode
+```python
+def reindex_changed(processor, docs, manifest):
+	 changed = []
+	 for d in docs:
+		  h = sha256(Path(d.file_path).read_bytes()).hexdigest()
+		  meta = manifest['documents'].get(d.name)
+		  if not meta or meta['sha256'] != h or meta['size'] != os.path.getsize(d.file_path):
+				changed.append(d)
+	 processed = await processor.process_documents(changed)
+	 await processor.index_documents(processed)
+	 update_manifest(processed, manifest)
+```
+
+### 🧭 Longer-Term
+- Replace manual print logs with structured logger (JSON) for observability
+- Optional: swap to pgvector / Qdrant when multi-user concurrency required
+
+---
+
+Tracking owner: (assign on adoption)
+Review cadence: weekly until all Immediate Next Steps complete
+
+---
+
+## 📌 Bookmarked Next Steps (Added 2025-08-12)
+
+These are the immediate, high-impact follow‑ups after eliminating per‑query re‑embedding and adding persistent vector storage.
+
+### ✅ Recently Completed
+- Stopped redundant embedding regeneration on each user query
+- Introduced persistent Chroma collection (streamlit session + disk)
+- Centralized processing at upload + explicit reindex
+
+### 🎯 Immediate Next Steps (High Value / Low Risk)
+1. Vector Store Health Panel
+	- Display: total chunks, distinct documents, last index time, embedding model name
+	- Warn if collection.count() == 0
+2. Duplicate / Stale Protection
+	- Maintain manifest (JSON) with file hash (SHA256), size, mtime -> only re-embed on change
+	- Provide "Reindex changed only" option
+3. Retrieval Quality Enhancements
+	- Add simple keyword boost (hybrid: semantic score + token overlap)
+	- Synonym map: {"gs": "gliding scholarship", "u/t": "under training"}
+4. Source Reference Enrichment
+	- Store page numbers & section titles in chunk metadata during indexing
+5. Safety / Validation
+	- Skip empty chunks; log count of discarded empties
+	- Enforce max chunk size guard (e.g. 2k tokens) before embedding
+
+### 🧪 Testing To Add
+- Unit: hash manifest logic; selective reindex function
+- Integration: upload → modify file → ensure only changed doc reindexed
+- Retrieval: query wind limits returns weather table chunk as first result
+
+### 📄 Proposed Manifest Structure (vectors/manifest.json)
+```jsonc
+{
+  "embedding_model": "all-MiniLM-L6-v2",
+  "last_full_reindex": "2025-08-12T12:34:56Z",
+  "documents": {
+	 "20241201-2 FTS DHOs Issue 3.pdf": {
+		"sha256": "<hash>",
+		"size": 123456,
+		"mtime": 1711234567,
+		"chunk_count": 119,
+		"last_indexed": "2025-08-12T12:34:56Z"
+	 }
+  }
+}
+```
+
+### 🔄 Selective Reindex Pseudocode
+```python
+def reindex_changed(processor, docs, manifest):
+	 changed = []
+	 for d in docs:
+		  h = sha256(Path(d.file_path).read_bytes()).hexdigest()
+		  meta = manifest['documents'].get(d.name)
+		  if not meta or meta['sha256'] != h or meta['size'] != os.path.getsize(d.file_path):
+				changed.append(d)
+	 processed = await processor.process_documents(changed)
+	 await processor.index_documents(processed)
+	 update_manifest(processed, manifest)
+```
+
+### 🧭 Longer-Term
+- Replace manual print logs with structured logger (JSON) for observability
+- Optional: swap to pgvector / Qdrant when multi-user concurrency required
+
+---
+
+Tracking owner: (assign on adoption)
+Review cadence: weekly until all Immediate Next Steps complete
+
+
+---
+
+## 📌 Bookmarked Next Steps (Added 2025-08-12)
+
+These are the immediate, high-impact follow‑ups after eliminating per‑query re‑embedding and adding persistent vector storage.
+
+### ✅ Recently Completed
+- Stopped redundant embedding regeneration on each user query
+- Introduced persistent Chroma collection (streamlit session + disk)
+- Centralized processing at upload + explicit reindex
+
+### 🎯 Immediate Next Steps (High Value / Low Risk)
+1. Vector Store Health Panel
+	- Display: total chunks, distinct documents, last index time, embedding model name
+	- Warn if collection.count() == 0
+2. Duplicate / Stale Protection
+	- Maintain manifest (JSON) with file hash (SHA256), size, mtime -> only re-embed on change
+	- Provide "Reindex changed only" option
+3. Retrieval Quality Enhancements
+	- Add simple keyword boost (hybrid: semantic score + token overlap)
+	- Synonym map: {"gs": "gliding scholarship", "u/t": "under training"}
+4. Source Reference Enrichment
+	- Store page numbers & section titles in chunk metadata during indexing
+5. Safety / Validation
+	- Skip empty chunks; log count of discarded empties
+	- Enforce max chunk size guard (e.g. 2k tokens) before embedding
+
+### 🧪 Testing To Add
+- Unit: hash manifest logic; selective reindex function
+- Integration: upload → modify file → ensure only changed doc reindexed
+- Retrieval: query wind limits returns weather table chunk as first result
+
+### 📄 Proposed Manifest Structure (vectors/manifest.json)
+```jsonc
+{
+  "embedding_model": "all-MiniLM-L6-v2",
+  "last_full_reindex": "2025-08-12T12:34:56Z",
+  "documents": {
+	 "20241201-2 FTS DHOs Issue 3.pdf": {
+		"sha256": "<hash>",
+		"size": 123456,
+		"mtime": 1711234567,
+		"chunk_count": 119,
+		"last_indexed": "2025-08-12T12:34:56Z"
+	 }
+  }
+}
+```
+
+### 🔄 Selective Reindex Pseudocode
+```python
+def reindex_changed(processor, docs, manifest):
+	 changed = []
+	 for d in docs:
+		  h = sha256(Path(d.file_path).read_bytes()).hexdigest()
+		  meta = manifest['documents'].get(d.name)
+		  if not meta or meta['sha256'] != h or meta['size'] != os.path.getsize(d.file_path):
+				changed.append(d)
+	 processed = await processor.process_documents(changed)
+	 await processor.index_documents(processed)
+	 update_manifest(processed, manifest)
+```
+
+### 🧭 Longer-Term
+- Replace manual print logs with structured logger (JSON) for observability
+- Optional: swap to pgvector / Qdrant when multi-user concurrency required
+
+---
+
+Tracking owner: (assign on adoption)
+Review cadence: weekly until all Immediate Next Steps complete

@@ -5,11 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from vgs_chatbot.models.chat import (
-    ChatMessage,
-    ChatResponse,
-    MessageRole,
-)
+from vgs_chatbot.models.chat import ChatMessage, ChatResponse, MessageRole
 from vgs_chatbot.models.document import Document
 from vgs_chatbot.services.chat_service import LLMChatService
 from vgs_chatbot.services.document_processor import RAGDocumentProcessor
@@ -30,8 +26,16 @@ class VGSChatbot:
         self.documents_dir.mkdir(parents=True, exist_ok=True)
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
 
-        # Initialize services
-        self.document_processor = RAGDocumentProcessor()
+        # Initialize / reuse document processor (persist across reruns & avoid re-embedding)
+        if "document_processor" in st.session_state:
+            self.document_processor = st.session_state.document_processor  # type: ignore[attr-defined]
+        else:
+            persist_path = self.vectors_dir / "chroma"
+            persist_path.mkdir(parents=True, exist_ok=True)
+            self.document_processor = RAGDocumentProcessor(
+                persist_directory=str(persist_path)
+            )
+            st.session_state.document_processor = self.document_processor  # type: ignore[attr-defined]
         self.chat_service = LLMChatService(
             openai_api_key=self.settings.openai_api_key,
             model=self.settings.openai_model,
@@ -55,7 +59,9 @@ class VGSChatbot:
         """
         try:
             # Get all document files
-            document_files = [doc for doc in self.documents_dir.glob("*") if doc.is_file()]
+            document_files = [
+                doc for doc in self.documents_dir.glob("*") if doc.is_file()
+            ]
 
             if not document_files:
                 return False
@@ -65,31 +71,42 @@ class VGSChatbot:
             for doc_path in document_files:
                 # Determine file type from extension
                 file_type_map = {
-                    '.pdf': 'application/pdf',
-                    '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-                    '.txt': 'text/plain'
+                    ".pdf": "application/pdf",
+                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    ".txt": "text/plain",
                 }
 
-                file_type = file_type_map.get(doc_path.suffix.lower(), 'application/octet-stream')
+                file_type = file_type_map.get(
+                    doc_path.suffix.lower(), "application/octet-stream"
+                )
 
                 document = Document(
                     name=doc_path.name,
                     file_path=str(doc_path),
                     file_type=file_type,
-                    directory_path=str(doc_path.parent)
+                    directory_path=str(doc_path.parent),
                 )
                 documents.append(document)
 
-            # Clear existing vector store (create new document processor instance)
-            self.document_processor = RAGDocumentProcessor()
+            # Recreate processor with same persistent path (clears collection implicitly if needed)
+            persist_path = self.vectors_dir / "chroma"
+            persist_path.mkdir(parents=True, exist_ok=True)
+            self.document_processor = RAGDocumentProcessor(
+                persist_directory=str(persist_path)
+            )
+            st.session_state.document_processor = (
+                self.document_processor
+            )  # keep in session
 
             # Process documents with improved chunking (async operations)
             import asyncio
 
             async def process_and_index():
-                processed_docs = await self.document_processor.process_documents(documents)
+                processed_docs = await self.document_processor.process_documents(
+                    documents
+                )
                 if processed_docs:
                     await self.document_processor.index_documents(processed_docs)
                 return len(processed_docs) > 0
@@ -101,7 +118,9 @@ class VGSChatbot:
 
             # Update the index marker file
             index_file = self.vectors_dir / ".documents_indexed"
-            index_file.write_text(f"Documents reindexed with improved chunking at {datetime.now(UTC)}")
+            index_file.write_text(
+                f"Documents reindexed with improved chunking at {datetime.now(UTC)}"
+            )
 
             return True
 
@@ -117,16 +136,14 @@ class VGSChatbot:
 
     def should_reprocess_documents(self) -> bool:
         """Determine if documents should be reprocessed."""
-        # Always reprocess to ensure we use the improved RAG pipeline
-        # In production, you might check timestamps or version markers
-        return True
+        return False
 
     def run(self) -> None:
         """Run the Streamlit application."""
         st.set_page_config(
             page_title="VGS Chatbot - 2FTS Document Assistant",
             page_icon="🚁",
-            layout="wide"
+            layout="wide",
         )
 
         # Initialize session state
@@ -174,7 +191,9 @@ class VGSChatbot:
                 if not email or not password:
                     st.error("Please enter both email and password")
                 elif not self.validate_mod_email(email):
-                    st.error("Access restricted to @mod.gov.uk and @mod.uk email addresses")
+                    st.error(
+                        "Access restricted to @mod.gov.uk and @mod.uk email addresses"
+                    )
                 else:
                     # Simplified login for demo - in production use proper auth
                     st.session_state.user_type = "user"
@@ -196,7 +215,9 @@ class VGSChatbot:
                 if not email or not password or not confirm_password:
                     st.error("Please fill in all fields")
                 elif not self.validate_mod_email(email):
-                    st.error("Registration restricted to @mod.gov.uk and @mod.uk email addresses")
+                    st.error(
+                        "Registration restricted to @mod.gov.uk and @mod.uk email addresses"
+                    )
                 elif password != confirm_password:
                     st.error("Passwords do not match")
                 else:
@@ -213,7 +234,10 @@ class VGSChatbot:
             login = st.form_submit_button("Admin Login")
 
             if login:
-                if username in self.admin_credentials and self.admin_credentials[username] == password:
+                if (
+                    username in self.admin_credentials
+                    and self.admin_credentials[username] == password
+                ):
                     st.session_state.user_type = "admin"
                     st.session_state.username = username
                     st.success("✅ Admin logged in successfully!")
@@ -246,38 +270,85 @@ class VGSChatbot:
         st.subheader("📤 Upload Documents")
         uploaded_files = st.file_uploader(
             "Select documents to upload (PDF, Word, Excel, PowerPoint, Text)",
-            type=['pdf', 'docx', 'xlsx', 'pptx', 'txt'],
-            accept_multiple_files=True
+            type=["pdf", "docx", "xlsx", "pptx", "txt"],
+            accept_multiple_files=True,
         )
 
         if uploaded_files:
             if st.button("Process and Index Documents"):
                 with st.spinner("Processing documents..."):
-                    success_count = 0
+                    saved_documents: list[Document] = []
                     for uploaded_file in uploaded_files:
                         try:
-                            # Save uploaded file
                             file_path = self.documents_dir / uploaded_file.name
                             with open(file_path, "wb") as f:
                                 f.write(uploaded_file.getbuffer())
 
-                            success_count += 1
+                            # Map extension to mime
+                            ext = file_path.suffix.lower()
+                            file_type_map = {
+                                ".pdf": "application/pdf",
+                                ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                                ".txt": "text/plain",
+                            }
+                            file_type = file_type_map.get(
+                                ext, "application/octet-stream"
+                            )
 
+                            saved_documents.append(
+                                Document(
+                                    name=uploaded_file.name,
+                                    file_path=str(file_path),
+                                    file_type=file_type,
+                                    directory_path=str(file_path.parent),
+                                )
+                            )
                         except Exception as e:
-                            st.error(f"Error processing {uploaded_file.name}: {str(e)}")
+                            st.error(f"Error saving {uploaded_file.name}: {str(e)}")
 
-                    if success_count > 0:
-                        # Create index marker file
-                        index_file = self.vectors_dir / ".documents_indexed"
-                        index_file.write_text(f"Documents indexed at {datetime.now()}")
-                        st.success(f"✅ Successfully processed {success_count} documents!")
-                        st.rerun()
+                    if not saved_documents:
+                        st.error("❌ No documents were successfully saved")
                     else:
-                        st.error("❌ No documents were successfully processed")
+                        # Process & index asynchronously (mirrors reindex logic)
+                        import asyncio
+
+                        async def process_and_index():
+                            processed_docs = (
+                                await self.document_processor.process_documents(
+                                    saved_documents
+                                )
+                            )
+                            if processed_docs:
+                                await self.document_processor.index_documents(
+                                    processed_docs
+                                )
+                            return len(processed_docs)
+
+                        try:
+                            processed_count = asyncio.run(process_and_index())
+                            if processed_count:
+                                index_file = self.vectors_dir / ".documents_indexed"
+                                index_file.write_text(
+                                    f"Documents indexed at {datetime.now(UTC)}"
+                                )
+                                st.success(
+                                    f"✅ Successfully processed & indexed {processed_count} documents!"
+                                )
+                                st.rerun()
+                            else:
+                                st.error(
+                                    "❌ Failed to process documents (no text extracted?)"
+                                )
+                        except Exception as e:
+                            st.error(f"Error generating embeddings: {e}")
 
         # Reindex existing documents
         st.subheader("🔄 Reindex Documents")
-        st.info("💡 Reindexing will apply improved chunking strategies to existing documents without re-uploading them.")
+        st.info(
+            "💡 Reindexing will apply improved chunking strategies to existing documents without re-uploading them."
+        )
 
         documents = list(self.documents_dir.glob("*"))
         indexed_documents = [doc for doc in documents if doc.is_file()]
@@ -291,15 +362,21 @@ class VGSChatbot:
 
             col1, col2 = st.columns([2, 1])
             with col1:
-                st.warning("⚠️ **Important**: Reindexing will clear the current search index and rebuild it with improved chunking strategies. This may take a few minutes.")
+                st.warning(
+                    "⚠️ **Important**: Reindexing will clear the current search index and rebuild it with improved chunking strategies. This may take a few minutes."
+                )
             with col2:
                 if st.button("🔄 Reindex All Documents", type="primary"):
                     with st.spinner("Reindexing documents with improved chunking..."):
                         try:
                             success = self._reindex_all_documents()
                             if success:
-                                st.success("✅ Successfully reindexed all documents with improved chunking!")
-                                st.info("🎉 Wind limits queries should now return more specific answers with pilot categories and exact limits.")
+                                st.success(
+                                    "✅ Successfully reindexed all documents with improved chunking!"
+                                )
+                                st.info(
+                                    "🎉 Wind limits queries should now return more specific answers with pilot categories and exact limits."
+                                )
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to reindex documents")
@@ -343,11 +420,20 @@ class VGSChatbot:
             if index_file.exists():
                 index_content = index_file.read_text()
                 if "reindexed with improved chunking" in index_content:
-                    st.success("🎯 **Enhanced Chunking Active**: Wind limits queries will return specific pilot categories and exact limits")
-                elif "improved chunking" in index_content or "Documents indexed at" in index_content:
-                    st.info("📈 **Improved Chunking**: Weather limitations table is preserved as high-priority chunk")
+                    st.success(
+                        "🎯 **Enhanced Chunking Active**: Wind limits queries will return specific pilot categories and exact limits"
+                    )
+                elif (
+                    "improved chunking" in index_content
+                    or "Documents indexed at" in index_content
+                ):
+                    st.info(
+                        "📈 **Improved Chunking**: Weather limitations table is preserved as high-priority chunk"
+                    )
                 else:
-                    st.warning("⚡ **Chunking Available**: Click 'Reindex All Documents' to apply improved wind limits detection")
+                    st.warning(
+                        "⚡ **Chunking Available**: Click 'Reindex All Documents' to apply improved wind limits detection"
+                    )
         else:
             st.warning("⚠️ No documents indexed yet")
 
@@ -359,11 +445,13 @@ class VGSChatbot:
 
         # Chunking strategy information
         st.subheader("🔧 Document Processing Features")
-        st.info("**Enhanced Chunking Strategy:**\n"
-                "• Weather limitations tables preserved as single chunks\n"
-                "• High priority scoring for regulatory tables\n"
-                "• Aviation-specific term extraction\n"
-                "• Improved search relevance for wind limits queries")
+        st.info(
+            "**Enhanced Chunking Strategy:**\n"
+            "• Weather limitations tables preserved as single chunks\n"
+            "• High priority scoring for regulatory tables\n"
+            "• Aviation-specific term extraction\n"
+            "• Improved search relevance for wind limits queries"
+        )
 
     def _render_user_page(self) -> None:
         """Render user chat interface."""
@@ -386,7 +474,9 @@ class VGSChatbot:
 
         # Check if documents are available
         if not self.are_documents_indexed():
-            st.warning("⚠️ No documents have been processed yet. Please contact your administrator to upload documents.")
+            st.warning(
+                "⚠️ No documents have been processed yet. Please contact your administrator to upload documents."
+            )
             return
 
         # Chat interface
@@ -431,6 +521,7 @@ class VGSChatbot:
             with st.chat_message("assistant"):
                 with st.spinner("Searching documents and generating response..."):
                     import asyncio
+
                     try:
                         loop = asyncio.get_event_loop()
                     except RuntimeError:
@@ -445,11 +536,13 @@ class VGSChatbot:
                         st.caption("**References:**")
 
                         # Create IEEE reference list with numbers
-                        ieee_refs = getattr(response, 'ieee_references', {})
+                        ieee_refs = getattr(response, "ieee_references", {})
 
                         for ref in response.source_references:
                             # Get IEEE reference number
-                            ref_num = ieee_refs.get(ref.document_name, len(ieee_refs) + 1)
+                            ref_num = ieee_refs.get(
+                                ref.document_name, len(ieee_refs) + 1
+                            )
 
                             # Build IEEE reference string
                             ref_text = f"[{ref_num}] {ref.document_name}"
@@ -488,71 +581,49 @@ class VGSChatbot:
         start_time = time.time()
 
         try:
-            # Get available documents using proper Document objects
-            documents = []
-            for doc_path in self.documents_dir.glob("*"):
-                if doc_path.is_file():
-                    try:
-                        doc = Document(
-                            name=doc_path.name,
-                            file_path=str(doc_path.absolute()),
-                            file_type=f"application/{doc_path.suffix[1:]}" if doc_path.suffix else "text/plain",
-                            directory_path=str(doc_path.parent.absolute())
-                        )
-                        documents.append(doc)
-                    except Exception as e:
-                        print(f"Error creating Document for {doc_path.name}: {e}")
-                        continue
-
-            if not documents:
+            # Ensure there is at least one indexed document
+            if self.document_processor.collection.count() == 0:
                 return ChatResponse(
-                    message="I apologize, but I couldn't access any documents to answer your question. Please contact the administrator.",
+                    message="No indexed documents found. Please upload and process documents first (Admin > Document Management).",
                     sources=[],
                     source_references=[],
                     confidence=0.0,
-                    processing_time=time.time() - start_time
+                    processing_time=time.time() - start_time,
                 )
 
-            # Use the improved document processor to process documents
-            processed_documents = await self.document_processor.process_documents(documents)
-
-            if not processed_documents:
-                return ChatResponse(
-                    message="I apologize, but I couldn't process any documents to answer your question. Please contact the administrator.",
-                    sources=[],
-                    source_references=[],
-                    confidence=0.0,
-                    processing_time=time.time() - start_time
-                )
-
-            print(f"Processed {len(processed_documents)} documents with improved RAG pipeline")
-
-            # Index documents (always reprocess to use improved pipeline)
-            if processed_documents and self.should_reprocess_documents():
-                await self.document_processor.index_documents(processed_documents)
-                print(f"Indexed {len(processed_documents)} documents using improved RAG pipeline")
-
-            # Use semantic search to find relevant documents
+            # Use semantic search against existing vector index
             try:
                 # Use higher top_k for comprehensive context, especially for wind limits queries
-                top_k = 8 if any(term in query.lower() for term in ['wind', 'limit', 'cadet', 'gs', 'pilot']) else 5
-                relevant_docs = await self.document_processor.search_documents(query, top_k=top_k)
-                context_documents = relevant_docs if relevant_docs else processed_documents[:3]
-                print(f"Search found {len(relevant_docs)} relevant documents for query: '{query}' (top_k={top_k})")
+                top_k = (
+                    8
+                    if any(
+                        term in query.lower()
+                        for term in ["wind", "limit", "cadet", "gs", "pilot"]
+                    )
+                    else 5
+                )
+                relevant_docs = await self.document_processor.search_documents(
+                    query, top_k=top_k
+                )
+                context_documents = relevant_docs[:3] if relevant_docs else []
+                print(
+                    f"Search found {len(relevant_docs)} relevant documents for query: '{query}' (top_k={top_k})"
+                )
             except Exception as e:
                 print(f"Error in semantic search, falling back to all documents: {e}")
-                # Fallback to using all documents if search fails
-                context_documents = processed_documents[:2]
+                context_documents = []
 
             # Create a simple chat message for the LLM service
-            messages = [ChatMessage(
-                role=MessageRole.USER,
-                content=query,
-                timestamp=datetime.now(UTC)
-            )]
+            messages = [
+                ChatMessage(
+                    role=MessageRole.USER, content=query, timestamp=datetime.now(UTC)
+                )
+            ]
 
             # Use the chat service to generate a proper response
-            response = await self.chat_service.generate_response(messages, context_documents)
+            response = await self.chat_service.generate_response(
+                messages, context_documents
+            )
 
             return response
 
@@ -562,7 +633,7 @@ class VGSChatbot:
                 sources=[],
                 source_references=[],
                 confidence=0.0,
-                processing_time=time.time() - start_time
+                processing_time=time.time() - start_time,
             )
 
 

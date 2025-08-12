@@ -18,16 +18,14 @@ from vgs_chatbot.models.document import ProcessedDocument
 class LLMChatService(ChatServiceInterface):
     """LLM-powered chat service implementation."""
 
-    def __init__(self, openai_api_key: str, model: str = "gpt-4o-mini") -> None:
+    def __init__(self, openai_api_key: str, model: str = "gpt-4.1-nano") -> None:
         """Initialize chat service.
 
         Args:
             openai_api_key: OpenAI API key
             model: OpenAI model to use
         """
-        self.llm = ChatOpenAI(
-            openai_api_key=openai_api_key, model=model, temperature=0.7
-        )
+        self.llm = ChatOpenAI(api_key=openai_api_key, model=model, temperature=0.1)
         self.memory = ConversationBufferMemory(
             memory_key="chat_history", return_messages=True
         )
@@ -353,12 +351,12 @@ Answer:"""
         if page_numbers:
             sorted_pages = sorted(page_numbers, key=int)
             if len(sorted_pages) == 1:
-                return f"Page {sorted_pages[0]}"
+                return sorted_pages[0]
             else:
-                return f"Pages {sorted_pages[0]}-{sorted_pages[-1]}"
+                return f"{sorted_pages[0]}-{sorted_pages[-1]}"
 
         # Fallback to metadata
         if hasattr(doc, "metadata") and doc.metadata.get("total_pages"):
-            return f"Pages 1-{doc.metadata['total_pages']}"
+            return f"1-{doc.metadata['total_pages']}"
 
-        return "Page 1"  # Fallback
+        return "1"  # Fallback
