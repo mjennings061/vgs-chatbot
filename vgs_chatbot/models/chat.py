@@ -11,7 +11,7 @@ class SourceReference(BaseModel):
 
     document_name: str
     section_title: str | None = None
-    page_number: int | None = None
+    page_number: str | int | None = None  # Allow string for page ranges like "Pages 107-108"
 
 
 class MessageRole(str, Enum):
@@ -42,6 +42,7 @@ class ChatResponse(BaseModel):
     source_references: list[SourceReference] = []
     confidence: float | None = None
     processing_time: float | None = None
+    ieee_references: dict[str, int] = {}  # Map document names to IEEE reference numbers
 
 
 class ChatSession(BaseModel):

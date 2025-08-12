@@ -1,6 +1,7 @@
 """Document data models."""
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -27,13 +28,10 @@ class ProcessedDocument(BaseModel):
     content: str
     chunks: list[str]
     embeddings: list[list[float]] | None = None
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
     processed_at: datetime
 
-    class Config:
-        """Pydantic configuration."""
-
-        arbitrary_types_allowed = True
+    model_config = {"arbitrary_types_allowed": True}
 
 
 class DocumentChunk(BaseModel):
@@ -46,4 +44,4 @@ class DocumentChunk(BaseModel):
     section_title: str | None = None
     page_number: int | None = None
     embedding: list[float] | None = None
-    metadata: dict = {}
+    metadata: dict[str, Any] = {}
