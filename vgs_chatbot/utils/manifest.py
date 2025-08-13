@@ -78,6 +78,22 @@ class DocumentManifest:
         changed_documents = []
 
         for doc in documents:
+            # Handle MongoDB-stored documents (no file_path)
+            if doc.file_path is None:
+                # For MongoDB documents, check if they exist in manifest
+                manifest_entry = self._manifest["documents"].get(doc.name)
+                if not manifest_entry:
+                    # New document not in manifest
+                    changed_documents.append(doc)
+                elif doc.uploaded_at and manifest_entry.get("uploaded_at"):
+                    # Compare upload timestamps if available
+                    manifest_upload_time = manifest_entry.get("uploaded_at")
+                    current_upload_time = doc.uploaded_at.isoformat() if hasattr(doc.uploaded_at, 'isoformat') else str(doc.uploaded_at)
+                    if manifest_upload_time != current_upload_time:
+                        changed_documents.append(doc)
+                continue
+
+            # Handle file-based documents (legacy)
             file_path = Path(doc.file_path)
             if not file_path.exists():
                 continue
@@ -113,24 +129,39 @@ class DocumentManifest:
             chunk_count: Number of chunks generated
             embedding_model: Embedding model used
         """
-        file_path = Path(doc.file_path)
-        if not file_path.exists():
-            return
-
-        # Calculate file properties
-        file_hash = self._calculate_file_hash(file_path)
-        file_size = file_path.stat().st_size
-        file_mtime = int(file_path.stat().st_mtime)
-
         # Update manifest
         self._manifest["embedding_model"] = embedding_model
-        self._manifest["documents"][doc.name] = {
-            "sha256": file_hash,
-            "size": file_size,
-            "mtime": file_mtime,
-            "chunk_count": chunk_count,
-            "last_indexed": datetime.now(UTC).isoformat(),
-        }
+
+        # Handle MongoDB-stored documents
+        if doc.file_path is None:
+            # For MongoDB documents, use document ID and upload time
+            self._manifest["documents"][doc.name] = {
+                "document_id": doc.id,
+                "size": doc.size or 0,
+                "uploaded_at": doc.uploaded_at.isoformat() if doc.uploaded_at and hasattr(doc.uploaded_at, 'isoformat') else str(doc.uploaded_at) if doc.uploaded_at else None,
+                "chunk_count": chunk_count,
+                "last_indexed": datetime.now(UTC).isoformat(),
+                "storage_type": "mongodb"
+            }
+        else:
+            # Handle file-based documents (legacy)
+            file_path = Path(doc.file_path)
+            if not file_path.exists():
+                return
+
+            # Calculate file properties
+            file_hash = self._calculate_file_hash(file_path)
+            file_size = file_path.stat().st_size
+            file_mtime = int(file_path.stat().st_mtime)
+
+            self._manifest["documents"][doc.name] = {
+                "sha256": file_hash,
+                "size": file_size,
+                "mtime": file_mtime,
+                "chunk_count": chunk_count,
+                "last_indexed": datetime.now(UTC).isoformat(),
+                "storage_type": "filesystem"
+            }
 
         self._save_manifest()
 

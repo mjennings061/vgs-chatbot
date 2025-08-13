@@ -1,43 +1,41 @@
 """User repository for database operations."""
 
+from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from bson import ObjectId
+from pymongo.collection import Collection
 
 from vgs_chatbot.models.user import User
-
-from .database import UserTable
 
 
 class UserRepository:
     """Repository for user database operations."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, collection: Collection) -> None:
         """Initialize user repository.
 
         Args:
-            session: Database session
+            collection: MongoDB users collection
         """
-        self.session = session
+        self.collection = collection
 
-    async def get_by_username(self, username: str) -> User | None:
-        """Get user by username.
+    async def get_by_email(self, email: str) -> User | None:
+        """Get user by email.
 
         Args:
-            username: Username to search for
+            email: Email to search for
 
         Returns:
             User if found, None otherwise
         """
-        stmt = select(UserTable).where(UserTable.username == username)
-        result = await self.session.execute(stmt)
-        user_row = result.scalar_one_or_none()
+        user_doc = self.collection.find_one({"email": email})
 
-        if user_row:
-            return User.model_validate(user_row)
+        if user_doc:
+            user_doc["_id"] = str(user_doc["_id"])
+            return User.model_validate(user_doc)
         return None
 
-    async def get_by_id(self, user_id: int) -> User | None:
+    async def get_by_id(self, user_id: str) -> User | None:
         """Get user by ID.
 
         Args:
@@ -46,12 +44,15 @@ class UserRepository:
         Returns:
             User if found, None otherwise
         """
-        stmt = select(UserTable).where(UserTable.id == user_id)
-        result = await self.session.execute(stmt)
-        user_row = result.scalar_one_or_none()
+        try:
+            object_id = ObjectId(user_id)
+            user_doc = self.collection.find_one({"_id": object_id})
 
-        if user_row:
-            return User.model_validate(user_row)
+            if user_doc:
+                user_doc["_id"] = str(user_doc["_id"])
+                return User.model_validate(user_doc)
+        except Exception:
+            return None
         return None
 
     async def create(self, user: User) -> User:
@@ -63,30 +64,24 @@ class UserRepository:
         Returns:
             Created user with ID
         """
-        user_table = UserTable(
-            username=user.username,
-            email=user.email,
-            password_hash=user.password_hash,
-            is_active=user.is_active
-        )
+        user_dict = user.model_dump(exclude={"id"}, by_alias=True)
 
-        self.session.add(user_table)
-        await self.session.commit()
-        await self.session.refresh(user_table)
+        result = self.collection.insert_one(user_dict)
+        user_dict["_id"] = str(result.inserted_id)
 
-        return User.model_validate(user_table)
+        return User.model_validate(user_dict)
 
-    async def update_last_login(self, user_id: int) -> None:
+    async def update_last_login(self, user_id: str) -> None:
         """Update user's last login timestamp.
 
         Args:
             user_id: User ID to update
         """
-        stmt = select(UserTable).where(UserTable.id == user_id)
-        result = await self.session.execute(stmt)
-        user_row = result.scalar_one_or_none()
-
-        if user_row:
-            from datetime import datetime
-            user_row.last_login = datetime.utcnow()
-            await self.session.commit()
+        try:
+            object_id = ObjectId(user_id)
+            self.collection.update_one(
+                {"_id": object_id},
+                {"$set": {"last_login": datetime.now(UTC)}}
+            )
+        except Exception:
+            pass

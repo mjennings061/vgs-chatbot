@@ -11,11 +11,13 @@ class Document(BaseModel):
 
     id: str | None = None
     name: str
-    file_path: str  # Changed from 'url' to 'file_path' for local documents
+    file_path: str | None = None  # Optional for MongoDB stored documents
     file_type: str
     size: int | None = None
     modified_date: datetime | None = None
-    directory_path: str
+    directory_path: str | None = None  # Optional for MongoDB stored documents
+    file_content: bytes | None = None  # New field for storing file content in MongoDB
+    uploaded_at: datetime | None = None  # Track upload timestamp
 
     model_config = {"str_strip_whitespace": True}
 

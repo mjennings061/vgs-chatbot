@@ -1,6 +1,6 @@
 """Authentication service implementation."""
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -23,17 +23,17 @@ class AuthenticationService(AuthenticationInterface):
         self.user_repository = user_repository
         self.jwt_secret = jwt_secret
 
-    async def authenticate(self, username: str, password: str) -> User | None:
-        """Authenticate user with username and password.
+    async def authenticate(self, email: str, password: str) -> User | None:
+        """Authenticate user with email and password.
 
         Args:
-            username: User's username
+            email: User's email
             password: User's password
 
         Returns:
             User object if authentication successful, None otherwise
         """
-        user = await self.user_repository.get_by_username(username)
+        user = await self.user_repository.get_by_email(email)
 
         if not user or not user.is_active:
             return None
@@ -44,13 +44,12 @@ class AuthenticationService(AuthenticationInterface):
         await self.user_repository.update_last_login(user.id)
         return user
 
-    async def create_user(self, username: str, password: str, email: str) -> User:
+    async def create_user(self, email: str, password: str) -> User:
         """Create a new user account.
 
         Args:
-            username: Unique username
+            email: User's email address (used as unique identifier)
             password: User's password
-            email: User's email address
 
         Returns:
             Created User object
@@ -58,10 +57,8 @@ class AuthenticationService(AuthenticationInterface):
         password_hash = self._hash_password(password)
 
         user = User(
-            username=username,
             email=email,
-            password_hash=password_hash,
-            created_at=datetime.utcnow()
+            password_hash=password_hash
         )
 
         return await self.user_repository.create(user)
@@ -98,8 +95,8 @@ class AuthenticationService(AuthenticationInterface):
         """
         payload = {
             "user_id": user.id,
-            "username": user.username,
-            "exp": datetime.utcnow() + timedelta(hours=24)
+            "email": user.email,
+            "exp": datetime.now(UTC) + timedelta(hours=24)
         }
 
         return jwt.encode(payload, self.jwt_secret, algorithm="HS256")

@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     """Application settings."""
 
-    # Database
-    database_url: str = "postgresql+asyncpg://user:password@localhost/vgs_chatbot"
+    # MongoDB
+    mongo_uri: str = os.environ.get("MONGO_URI", "")
 
     # JWT
     jwt_secret: str = "your-secret-key-change-in-production"
@@ -39,6 +39,7 @@ class Settings(BaseSettings):
 
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # Ignore extra fields from .env
 
 
 def get_settings() -> Settings:

@@ -19,7 +19,7 @@ from vgs_chatbot.services.query_expander import QueryExpander
 class LLMChatService(ChatServiceInterface):
     """LLM-powered chat service implementation."""
 
-    def __init__(self, openai_api_key: str, model: str = "gpt-4o-mini") -> None:
+    def __init__(self, openai_api_key: str, model: str = "gpt-4.1-nano") -> None:
         """Initialize chat service.
 
         Args:
@@ -270,7 +270,7 @@ class LLMChatService(ChatServiceInterface):
         # First, prioritize any DHO chunks that contain procedural requirements
         critical_dho_chunks = []
         other_dho_chunks = []
-        
+
         for doc in dho_docs:
             for chunk in doc.chunks:
                 if self._is_procedural_requirement_content(chunk):
@@ -282,7 +282,7 @@ class LLMChatService(ChatServiceInterface):
         if critical_dho_chunks:
             context_parts.append("CRITICAL OPERATIONAL REQUIREMENTS (DHO):")
             context_parts.append("=" * 50)
-            
+
             for i, (doc, chunk) in enumerate(critical_dho_chunks[:3], 1):  # Top 3 critical chunks
                 section_title = self._extract_chunk_section_info(chunk)
                 context_parts.append(f"DHO Requirement {i}: {doc.original_document.name}")
@@ -294,7 +294,7 @@ class LLMChatService(ChatServiceInterface):
         if other_dho_chunks:
             context_parts.append("\nADDITIONAL DHO GUIDANCE:")
             context_parts.append("=" * 30)
-            
+
             for i, (doc, chunk) in enumerate(other_dho_chunks[:2], 1):  # Top 2 additional chunks
                 section_title = self._extract_chunk_section_info(chunk)
                 context_parts.append(f"DHO Info {i}: {doc.original_document.name}")
@@ -316,7 +316,7 @@ class LLMChatService(ChatServiceInterface):
         if not critical_dho_chunks and gaso_docs:
             context_parts.append("\nGENERAL POLICY (GASO - Use only if DHO guidance unavailable):")
             context_parts.append("=" * 60)
-            
+
             for doc in gaso_docs[:1]:  # Only 1 GASO doc for fallback
                 for i, chunk in enumerate(doc.chunks[:2], 1):  # Max 2 chunks
                     section_title = self._extract_chunk_section_info(chunk)
@@ -540,9 +540,9 @@ Answer:"""
             True if chunk contains procedural requirements
         """
         import re
-        
+
         chunk_lower = chunk.lower()
-        
+
         # Look for formal requirement language patterns
         requirement_patterns = [
             r"minimum of \d+",  # "minimum of X"
@@ -559,11 +559,11 @@ Answer:"""
             r"pass the",        # test/exam requirements
             r"complete[d]? \d+", # completion requirements with numbers
         ]
-        
+
         # Count matches of requirement patterns
-        pattern_matches = sum(1 for pattern in requirement_patterns 
+        pattern_matches = sum(1 for pattern in requirement_patterns
                             if re.search(pattern, chunk_lower))
-        
+
         # Look for structured requirement lists (numbered/lettered items)
         structured_list_patterns = [
             r"\(\d+\)",         # (1), (2), etc.
@@ -571,17 +571,17 @@ Answer:"""
             r"^\s*\d+\.",       # 1., 2., etc. at line start
             r"^\s*[a-z]\.",     # a., b., etc. at line start
         ]
-        
+
         lines = chunk.split('\n')
-        structured_items = sum(1 for line in lines 
+        structured_items = sum(1 for line in lines
                              for pattern in structured_list_patterns
                              if re.search(pattern, line.strip()))
-        
+
         # Consider it procedural if:
         # - Multiple requirement patterns found, OR
         # - Structured list with some requirement language, OR
         # - High density of requirement language
-        return (pattern_matches >= 3 or 
+        return (pattern_matches >= 3 or
                 (structured_items >= 2 and pattern_matches >= 1) or
                 (len(chunk) > 0 and pattern_matches / len(chunk.split()) > 0.02))  # Fallback
 
@@ -672,17 +672,17 @@ Answer:"""
         # Look for DHO and GASO number patterns throughout the content
         for line in lines[:15]:  # Check more lines for references
             line_stripped = line.strip()
-            
+
             # DHO number patterns (DHO followed by 4 digits)
             dho_match = re.search(r"DHO\s*(\d{4})", line_stripped.upper())
             if dho_match:
                 return f"DHO {dho_match.group(1)}"
-            
+
             # GASO number patterns (GASO followed by digits)
             gaso_match = re.search(r"GASO\s*(\d+)", line_stripped.upper())
             if gaso_match:
                 return f"GASO {gaso_match.group(1)}"
-            
+
             # FTP references (often part of DHO content)
             ftp_match = re.search(r"(FTP\d{4})", line_stripped.upper())
             if ftp_match:
@@ -700,8 +700,8 @@ Answer:"""
         # Fallback to first meaningful line that looks like a title
         for line in lines[:3]:
             line_stripped = line.strip()
-            if (line_stripped and 
-                len(line_stripped) > 5 and 
+            if (line_stripped and
+                len(line_stripped) > 5 and
                 len(line_stripped) < 100 and
                 not line_stripped.startswith("(")):
                 return line_stripped
