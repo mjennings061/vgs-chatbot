@@ -18,8 +18,15 @@
       "Bash(python:*)",
       "Bash(poetry run python:*)",
       "Bash(poetry run isort:*)",
-      "Bash(poetry run streamlit run:*)"
+      "Bash(poetry run streamlit run:*)",
+      "Bash(source:*)",
+      "Bash(lsof:*)",
+      "Bash(kill:*)",
+      "Bash(timeout 10s poetry run streamlit run:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs"
     ],
-    "deny": []
+    "deny": [],
+    "defaultMode": "acceptEdits"
   }
 }

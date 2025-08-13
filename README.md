@@ -4,7 +4,6 @@ A modern, locally-hosted chatbot that connects to SharePoint to access 2FTS docu
 
 ## Features
 
-- **SharePoint Integration**: Connect to SharePoint sites using user credentials
 - **RAG Pipeline**: Advanced document processing and semantic search
 - **User Authentication**: PostgreSQL-backed user management
 - **Modern Architecture**: SOLID principles with dependency injection
@@ -28,10 +27,9 @@ vgs_chatbot/
 ### Key Components
 
 1. **Authentication Service**: PostgreSQL-backed user login system
-2. **SharePoint Connector**: Document access via configurable URL list
-3. **Document Processor**: RAG pipeline for document indexing and search
-4. **Chat Service**: LLM-powered question answering
-5. **Web Interface**: Streamlit-based chatbot application
+2. **Document Processor**: RAG pipeline for document indexing and search
+3. **Chat Service**: LLM-powered question answering
+4. **Web Interface**: Streamlit-based chatbot application
 
 ## Setup
 

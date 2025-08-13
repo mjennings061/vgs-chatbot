@@ -7,8 +7,13 @@ import streamlit as st
 
 from vgs_chatbot.models.chat import ChatMessage, ChatResponse, MessageRole
 from vgs_chatbot.models.document import Document
+from vgs_chatbot.repositories.database import DatabaseManager
+from vgs_chatbot.repositories.document_repository import DocumentRepository
+from vgs_chatbot.repositories.user_repository import UserRepository
+from vgs_chatbot.repositories.vector_repository import VectorRepository
+from vgs_chatbot.services.auth_service import AuthenticationService
 from vgs_chatbot.services.chat_service import LLMChatService
-from vgs_chatbot.services.document_processor import RAGDocumentProcessor
+from vgs_chatbot.services.mongodb_document_processor import MongoDBDocumentProcessor
 from vgs_chatbot.utils.config import get_settings
 
 
@@ -19,23 +24,35 @@ class VGSChatbot:
         """Initialize chatbot application."""
         self.settings = get_settings()
         self.data_dir = Path("data")
-        self.documents_dir = self.data_dir / "documents"
         self.vectors_dir = self.data_dir / "vectors"
 
-        # Ensure directories exist
-        self.documents_dir.mkdir(parents=True, exist_ok=True)
+        # Ensure vectors directory exists (for manifest)
         self.vectors_dir.mkdir(parents=True, exist_ok=True)
+
+        # Initialize MongoDB database manager first
+        self.db_manager = DatabaseManager(self.settings.mongo_uri)
+        self.users_collection = self.db_manager.get_collection("users")
+        self.uploads_collection = self.db_manager.get_collection("uploads")
+        self.user_repository = UserRepository(self.users_collection)
+        self.document_repository = DocumentRepository(self.uploads_collection)
+        self.auth_service = AuthenticationService(
+            self.user_repository,
+            self.settings.jwt_secret
+        )
 
         # Initialize / reuse document processor (persist across reruns & avoid re-embedding)
         if "document_processor" in st.session_state:
             self.document_processor = st.session_state.document_processor  # type: ignore[attr-defined]
         else:
-            persist_path = self.vectors_dir / "chroma"
-            persist_path.mkdir(parents=True, exist_ok=True)
-            self.document_processor = RAGDocumentProcessor(
-                persist_directory=str(persist_path)
+            # Initialize MongoDB-based document processor
+            documents_collection = self.db_manager.get_collection("documents")
+            vector_repository = VectorRepository(documents_collection)
+            self.document_processor = MongoDBDocumentProcessor(
+                vector_repository=vector_repository,
+                manifest_path="data/vectors/manifest.json"
             )
             st.session_state.document_processor = self.document_processor  # type: ignore[attr-defined]
+
         self.chat_service = LLMChatService(
             openai_api_key=self.settings.openai_api_key,
             model=self.settings.openai_model,
@@ -47,8 +64,8 @@ class VGSChatbot:
         }
 
     def validate_mod_email(self, email: str) -> bool:
-        """Validate email is from MOD domain."""
-        allowed_domains = ["@mod.gov.uk", "@mod.uk"]
+        """Validate email is from RAF Air Cadets or MOD domain."""
+        allowed_domains = ["@rafac.mod.gov.uk", "@mod.uk"]
         return any(email.lower().endswith(domain) for domain in allowed_domains)
 
     def _reindex_all_documents(self) -> bool:
@@ -58,51 +75,25 @@ class VGSChatbot:
             bool: True if reindexing was successful, False otherwise
         """
         try:
-            # Get all document files
-            document_files = [
-                doc for doc in self.documents_dir.glob("*") if doc.is_file()
-            ]
+            # Get all documents from MongoDB uploads collection
+            import asyncio
+            documents = asyncio.run(self.document_repository.list_documents())
 
-            if not document_files:
+            if not documents:
                 return False
 
-            # Convert to Document objects
-            documents = []
-            for doc_path in document_files:
-                # Determine file type from extension
-                file_type_map = {
-                    ".pdf": "application/pdf",
-                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    ".txt": "text/plain",
-                }
-
-                file_type = file_type_map.get(
-                    doc_path.suffix.lower(), "application/octet-stream"
-                )
-
-                document = Document(
-                    name=doc_path.name,
-                    file_path=str(doc_path),
-                    file_type=file_type,
-                    directory_path=str(doc_path.parent),
-                )
-                documents.append(document)
-
-            # Recreate processor with same persistent path (clears collection implicitly if needed)
-            persist_path = self.vectors_dir / "chroma"
-            persist_path.mkdir(parents=True, exist_ok=True)
-            self.document_processor = RAGDocumentProcessor(
-                persist_directory=str(persist_path)
+            # Recreate processor (clears collection implicitly if needed)
+            documents_collection = self.db_manager.get_collection("documents")
+            vector_repository = VectorRepository(documents_collection)
+            self.document_processor = MongoDBDocumentProcessor(
+                vector_repository=vector_repository,
+                manifest_path="data/vectors/manifest.json"
             )
             st.session_state.document_processor = (
                 self.document_processor
             )  # keep in session
 
             # Process documents with improved chunking (async operations)
-            import asyncio
-
             async def process_and_index():
                 processed_docs = await self.document_processor.process_documents(
                     documents
@@ -167,8 +158,9 @@ class VGSChatbot:
 
     def are_documents_indexed(self) -> bool:
         """Check if documents have been processed and are ready for chat."""
-        # Check if we have any documents at all
-        documents = list(self.documents_dir.glob("*"))
+        # Check if we have any documents in MongoDB
+        import asyncio
+        documents = asyncio.run(self.document_repository.list_documents())
         return len(documents) > 0
 
     def should_reprocess_documents(self) -> bool:
@@ -229,14 +221,25 @@ class VGSChatbot:
                     st.error("Please enter both email and password")
                 elif not self.validate_mod_email(email):
                     st.error(
-                        "Access restricted to @mod.gov.uk and @mod.uk email addresses"
+                        "Access restricted to @rafac.mod.gov.uk and @mod.uk email addresses"
                     )
                 else:
-                    # Simplified login for demo - in production use proper auth
-                    st.session_state.user_type = "user"
-                    st.session_state.username = email
-                    st.success("✅ Logged in successfully!")
-                    st.rerun()
+                    # Use proper MongoDB authentication
+                    try:
+                        import asyncio
+                        authenticated_user = asyncio.run(
+                            self.auth_service.authenticate(email, password)
+                        )
+                        if authenticated_user:
+                            st.session_state.user_type = "user"
+                            st.session_state.username = email
+                            st.session_state.user_id = authenticated_user.id
+                            st.success("✅ Logged in successfully!")
+                            st.rerun()
+                        else:
+                            st.error("❌ Invalid email or password")
+                    except Exception as e:
+                        st.error(f"❌ Login failed: {str(e)}")
 
     def _render_user_register(self) -> None:
         """Render user registration form."""
@@ -253,34 +256,73 @@ class VGSChatbot:
                     st.error("Please fill in all fields")
                 elif not self.validate_mod_email(email):
                     st.error(
-                        "Registration restricted to @mod.gov.uk and @mod.uk email addresses"
+                        "Registration restricted to @rafac.mod.gov.uk and @mod.uk email addresses"
                     )
                 elif password != confirm_password:
                     st.error("Passwords do not match")
                 else:
-                    # Simplified registration for demo
-                    st.success("✅ Registration successful! You can now log in.")
+                    # Use proper MongoDB authentication
+                    try:
+                        import asyncio
+                        new_user = asyncio.run(
+                            self.auth_service.create_user(
+                                email=email,
+                                password=password
+                            )
+                        )
+                        if new_user:
+                            st.success("✅ Registration successful! You can now log in.")
+                        else:
+                            st.error("❌ Registration failed")
+                    except Exception as e:
+                        if "duplicate key" in str(e).lower():
+                            st.error("❌ User with this email already exists")
+                        else:
+                            st.error(f"❌ Registration failed: {str(e)}")
 
     def _render_admin_login(self) -> None:
         """Render admin login form."""
         st.header("Administrator Login")
 
         with st.form("admin_login"):
-            username = st.text_input("Admin Username")
+            email = st.text_input("Admin Email")
             password = st.text_input("Admin Password", type="password")
             login = st.form_submit_button("Admin Login")
 
             if login:
-                if (
-                    username in self.admin_credentials
-                    and self.admin_credentials[username] == password
-                ):
-                    st.session_state.user_type = "admin"
-                    st.session_state.username = username
-                    st.success("✅ Admin logged in successfully!")
-                    st.rerun()
+                if not email or not password:
+                    st.error("Please enter both email and password")
                 else:
-                    st.error("❌ Invalid admin credentials")
+                    # Try MongoDB authentication first
+                    mongodb_auth_success = False
+                    try:
+                        import asyncio
+                        authenticated_user = asyncio.run(
+                            self.auth_service.authenticate(email, password)
+                        )
+                        if authenticated_user:
+                            st.session_state.user_type = "admin"
+                            st.session_state.username = email
+                            st.session_state.user_id = authenticated_user.id
+                            st.success("✅ Admin logged in successfully via MongoDB!")
+                            mongodb_auth_success = True
+                    except Exception as e:
+                        print(f"MongoDB admin auth failed: {e}")
+
+                    # Fallback to .env credentials if MongoDB auth fails
+                    if not mongodb_auth_success:
+                        # Check if email matches admin pattern and password matches .env
+                        admin_email = f"{self.settings.admin_username}@rafac.mod.gov.uk"
+                        if (email == admin_email and password == self.settings.admin_password):
+                            st.session_state.user_type = "admin"
+                            st.session_state.username = email
+                            st.success("✅ Admin logged in successfully via .env credentials!")
+                            mongodb_auth_success = True
+
+                    if mongodb_auth_success:
+                        st.rerun()
+                    else:
+                        st.error("❌ Invalid admin credentials")
 
     def _render_admin_page(self) -> None:
         """Render admin dashboard."""
@@ -317,12 +359,8 @@ class VGSChatbot:
                     saved_documents: list[Document] = []
                     for uploaded_file in uploaded_files:
                         try:
-                            file_path = self.documents_dir / uploaded_file.name
-                            with open(file_path, "wb") as f:
-                                f.write(uploaded_file.getbuffer())
-
-                            # Map extension to mime
-                            ext = file_path.suffix.lower()
+                            # Map extension to mime type
+                            file_extension = Path(uploaded_file.name).suffix.lower()
                             file_type_map = {
                                 ".pdf": "application/pdf",
                                 ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -331,17 +369,28 @@ class VGSChatbot:
                                 ".txt": "text/plain",
                             }
                             file_type = file_type_map.get(
-                                ext, "application/octet-stream"
+                                file_extension, "application/octet-stream"
                             )
 
-                            saved_documents.append(
-                                Document(
-                                    name=uploaded_file.name,
-                                    file_path=str(file_path),
-                                    file_type=file_type,
-                                    directory_path=str(file_path.parent),
-                                )
+                            # Check if document already exists
+                            import asyncio
+                            if asyncio.run(self.document_repository.document_exists(uploaded_file.name)):
+                                st.warning(f"Document {uploaded_file.name} already exists. Skipping...")
+                                continue
+
+                            # Create document with file content stored in MongoDB
+                            document = Document(
+                                name=uploaded_file.name,
+                                file_type=file_type,
+                                size=uploaded_file.size,
+                                file_content=bytes(uploaded_file.getbuffer()),
+                                uploaded_at=datetime.now(UTC)
                             )
+
+                            # Save to MongoDB uploads collection
+                            saved_doc = asyncio.run(self.document_repository.save_document(document))
+                            saved_documents.append(saved_doc)
+
                         except Exception as e:
                             st.error(f"Error saving {uploaded_file.name}: {str(e)}")
 
@@ -387,8 +436,9 @@ class VGSChatbot:
             "💡 Reindexing will apply improved chunking strategies to existing documents without re-uploading them."
         )
 
-        documents = list(self.documents_dir.glob("*"))
-        indexed_documents = [doc for doc in documents if doc.is_file()]
+        # Get documents from MongoDB uploads collection
+        import asyncio
+        indexed_documents = asyncio.run(self.document_repository.list_documents())
 
         if indexed_documents:
             # Show manifest statistics
@@ -409,22 +459,7 @@ class VGSChatbot:
                 st.write(f"• ... and {len(indexed_documents) - 5} more")
 
             # Check for changed documents
-            doc_objects = []
-            for doc_path in indexed_documents:
-                file_type_map = {
-                    ".pdf": "application/pdf",
-                    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-                    ".txt": "text/plain",
-                }
-                file_type = file_type_map.get(doc_path.suffix.lower(), "application/octet-stream")
-                doc_objects.append(Document(
-                    name=doc_path.name,
-                    file_path=str(doc_path),
-                    file_type=file_type,
-                    directory_path=str(doc_path.parent),
-                ))
+            doc_objects = indexed_documents
 
             changed_docs = self.document_processor.manifest.get_changed_documents(doc_objects)
 
@@ -481,12 +516,16 @@ class VGSChatbot:
                 with col1:
                     st.write(f"📄 {doc.name}")
                 with col2:
-                    st.write(f"{doc.stat().st_size / 1024:.1f} KB")
+                    size_kb = (doc.size or 0) / 1024
+                    st.write(f"{size_kb:.1f} KB")
                 with col3:
                     if st.button("🗑️", key=f"delete_{doc.name}"):
-                        doc.unlink()
-                        st.success(f"Deleted {doc.name}")
-                        st.rerun()
+                        import asyncio
+                        if doc.id and asyncio.run(self.document_repository.delete_document(doc.id)):
+                            st.success(f"Deleted {doc.name}")
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to delete {doc.name}")
         else:
             st.info("No documents uploaded yet")
 
@@ -494,16 +533,18 @@ class VGSChatbot:
         """Render system status information."""
         st.header("System Status")
 
-        # Document statistics
-        doc_count = len([f for f in self.documents_dir.glob("*") if f.is_file()])
+        # Document statistics from MongoDB
+        import asyncio
+        documents = asyncio.run(self.document_repository.list_documents())
+        doc_count = len(documents)
         st.metric("📄 Documents", doc_count)
 
         # Vector Store Health Panel
         st.subheader("🧮 Vector Store Health Panel")
         try:
             # Get collection statistics
-            collection = self.document_processor.collection
-            total_chunks = collection.count()
+            stats = self.document_processor.get_collection_stats()
+            total_chunks = stats["total_chunks"]
 
             if total_chunks == 0:
                 st.warning("⚠️ **Vector store is empty** - No documents indexed yet")
@@ -514,19 +555,10 @@ class VGSChatbot:
                     st.metric("📦 Total Chunks", total_chunks)
 
                 with col2:
-                    # Count distinct documents by querying a sample and extracting unique document names
+                    # Count distinct documents from stats
                     try:
-                        sample_results = collection.query(
-                            query_texts=["sample query"],
-                            n_results=min(total_chunks, 100)  # Sample up to 100 chunks
-                        )
-                        distinct_docs = set()
-                        metadatas_list = sample_results.get("metadatas")
-                        if metadatas_list and len(metadatas_list) > 0 and metadatas_list[0]:
-                            for metadata in metadatas_list[0]:
-                                if metadata and metadata.get("document_name"):
-                                    distinct_docs.add(metadata["document_name"])
-                        st.metric("📋 Distinct Documents", len(distinct_docs))
+                        distinct_doc_count = stats["processed_documents"]
+                        st.metric("📋 Distinct Documents", distinct_doc_count)
                     except Exception:
                         st.metric("📋 Distinct Documents", "Unknown")
 
@@ -605,7 +637,8 @@ class VGSChatbot:
                 st.rerun()
 
             st.header("📚 Available Documents")
-            documents = [f for f in self.documents_dir.glob("*") if f.is_file()]
+            import asyncio
+            documents = asyncio.run(self.document_repository.list_documents())
             if documents:
                 for doc in documents:
                     st.write(f"📄 {doc.name}")
@@ -722,7 +755,8 @@ class VGSChatbot:
 
         try:
             # Ensure there is at least one indexed document
-            if self.document_processor.collection.count() == 0:
+            stats = self.document_processor.get_collection_stats()
+            if stats["total_chunks"] == 0:
                 return ChatResponse(
                     message="No indexed documents found. Please upload and process documents first (Admin > Document Management).",
                     sources=[],

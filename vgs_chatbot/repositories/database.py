@@ -1,63 +1,83 @@
-"""Database models and configuration."""
-
-from collections.abc import AsyncGenerator
-from datetime import datetime
-
-from sqlalchemy import Boolean, DateTime, Integer, String
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+"""Database models and configuration for MongoDB."""
 
 
-class Base(DeclarativeBase):
-    """Base class for database models."""
-    pass
-
-
-class UserTable(Base):
-    """User table model."""
-
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_login: Mapped[datetime] = mapped_column(DateTime, nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+from pymongo import MongoClient
+from pymongo.database import Database
 
 
 class DatabaseManager:
-    """Database connection manager."""
+    """MongoDB connection manager."""
 
-    def __init__(self, database_url: str) -> None:
+    def __init__(self, mongo_uri: str, database_name: str = "chatbot") -> None:
         """Initialize database manager.
 
         Args:
-            database_url: Database connection URL
+            mongo_uri: MongoDB connection URI
+            database_name: Name of the database to use
         """
-        self.engine = create_async_engine(database_url, echo=False)
-        self.async_session = async_sessionmaker(
-            self.engine, class_=AsyncSession, expire_on_commit=False
-        )
+        self.mongo_uri = mongo_uri
+        self.database_name = database_name
+        self.client: MongoClient | None = None
+        self.database: Database | None = None
 
-    async def create_tables(self) -> None:
-        """Create database tables."""
-        async with self.engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    def connect(self) -> Database:
+        """Connect to MongoDB and return database instance.
 
-    async def get_session(self) -> AsyncGenerator[AsyncSession, None]:
-        """Get database session.
-
-        Yields:
-            Database session
+        Returns:
+            MongoDB database instance
         """
-        async with self.async_session() as session:
-            try:
-                yield session
-            finally:
-                await session.close()
+        if self.client is None:
+            self.client = MongoClient(self.mongo_uri)
+            self.database = self.client[self.database_name]
+        return self.database
 
-    async def close(self) -> None:
+    def get_collection(self, collection_name: str):
+        """Get MongoDB collection.
+
+        Args:
+            collection_name: Name of the collection
+
+        Returns:
+            MongoDB collection instance
+        """
+        if self.database is None:
+            self.connect()
+        return self.database[collection_name]
+
+    async def create_indexes(self) -> None:
+        """Create database indexes for better performance."""
+        db = self.connect()
+
+        # Create unique index for users collection
+        users_collection = db.users
+        users_collection.create_index("email", unique=True)
+
+        # Create indexes for documents collection (vector storage)
+        documents_collection = db.documents
+        # Compound index for document queries
+        documents_collection.create_index([
+            ("document_id", 1),
+            ("chunk_index", 1)
+        ])
+        # Index for metadata queries
+        documents_collection.create_index("metadata.document_name")
+        # Text search index for content
+        documents_collection.create_index([("content", "text")])
+
+        # Create indexes for uploads collection
+        uploads_collection = db.uploads
+        # Unique index for document names
+        uploads_collection.create_index("name", unique=True)
+        # Index for document ID
+        uploads_collection.create_index("id")
+        # Index for file type queries
+        uploads_collection.create_index("file_type")
+        # Index for upload date queries
+        uploads_collection.create_index("uploaded_at")
+
+    def close(self) -> None:
         """Close database connection."""
-        await self.engine.dispose()
+        if self.client is not None:
+            self.client.close()
+            self.client = None
+            self.database = None

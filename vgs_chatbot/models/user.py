@@ -1,31 +1,28 @@
 """User data models."""
 
-from datetime import datetime
-from uuid import UUID, uuid4
+from datetime import UTC, datetime
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class User(BaseModel):
     """User model."""
-    id: UUID = uuid4()
-    username: str
+    id: str | None = Field(default=None, alias="_id")
     email: EmailStr
     password_hash: str
-    created_at: datetime = datetime.now()
-    last_login: datetime = datetime.now()
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_login: datetime | None = None
     is_active: bool = True
 
     class Config:
         """Pydantic configuration."""
-
-        from_attributes = True
+        populate_by_name = True
+        arbitrary_types_allowed = True
 
 
 class UserCreate(BaseModel):
     """User creation model."""
 
-    username: str
     email: EmailStr
     password: str
 
@@ -33,5 +30,5 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     """User login model."""
 
-    username: str
+    email: EmailStr
     password: str
