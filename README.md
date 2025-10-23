@@ -13,22 +13,29 @@ A Streamlit application that lets RAF 2FTS instructors explore Viking training m
 
 ## Prerequisites
 
-- Python 3.13 (tested with CPython 3.13.9)
-- [`uv`](https://docs.astral.sh/uv/) for dependency and virtualenv management
+- Python 3.13
 - MongoDB Atlas cluster with Search and Vector Search enabled
-
-Install `uv` if you do not already have it:
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
 
 ## Setup
 
+Create and activate a virtual environment, install dependencies, and prepare env vars.
+
+macOS/Linux
+
 ```bash
-uv venv
-uv sync
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 cp .env.example .env
+```
+
+Windows (PowerShell)
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
 Edit `.env` with the Atlas host and optional OpenAI API key. The application reads:
@@ -89,7 +96,7 @@ Atlas Search (`doc_chunks`, name `vgs_text`)
 ## Running the app
 
 ```bash
-uv run streamlit run streamlit_app.py
+streamlit run streamlit_app.py
 ```
 
 1. Open the displayed local URL, sign in with the credentials from `.env`, and the home page will confirm the Atlas host in use.
@@ -107,13 +114,16 @@ uv run streamlit run streamlit_app.py
 - Retrieval expands the query to graph-linked chunks, runs Vector Search and text search, fuses the scores, and shows cited answers (`Document · Section · Page`).
 - When `OPENAI_API_KEY` is unset, responses fall back to the highest scoring chunk extract.
 
-## Development tasks
+## Development notes
 
-- Format and lint: `uv run ruff format .` then `uv run ruff check .`
-- Imports: `uv run isort .`
-- Run the local hooks: `uv run pre-commit run --all-files`
+- Optional: use tools like Ruff, isort, and pre-commit locally if you wish.
 
-The repo ships stub typings for third-party libraries under `typings/` to keep Pyright quiet when desired.
+### Enable OpenAI (optional)
+
+By default, the app runs without an LLM and falls back to extractive answers. To enable OpenAI responses:
+
+- Install the SDK: `pip install openai` (or add it to `requirements.txt`).
+- Set `OPENAI_API_KEY` in `.env`.
 
 ## Security notes
 
