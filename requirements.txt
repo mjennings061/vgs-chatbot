@@ -7,4 +7,4 @@ fastembed>=0.3.4
 yake>=0.4.8
 
 # Optional: enable LLM answers by installing OpenAI SDK locally
-# openai>=1.35
+openai>=1.35
