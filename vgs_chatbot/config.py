@@ -1,38 +1,95 @@
-"""Application configuration helpers."""
+"""Application configuration: lightweight and Streamlit-friendly.
+
+This module provides a very small `Settings` object whose attributes are loaded
+from Streamlit secrets when available, otherwise from environment variables.
+Local development can still use a `.env` file (loaded via python-dotenv).
+"""
 
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from typing import Optional
 
 from dotenv import load_dotenv
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Load .env early so local development mirrors deployed environments.
+# Load .env for local development so env vars are available via os.getenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
 
-class Settings(BaseSettings):
-    """Centralised configuration backed by environment variables."""
+def _get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+    """Return a config value from st.secrets or the environment.
 
-    # Keep only necessary environment variables
-    mongodb_host: str = Field(..., alias="MONGODB_HOST")
-    openai_api_key: Optional[str] = Field(None, alias="OPENAI_API_KEY")
+    Streamlit Community Cloud exposes secrets via `st.secrets`. Locally, or when
+    not running under Streamlit, fall back to environment variables.
+    """
+    try:  # Avoid hard dependency on Streamlit
+        import streamlit as st  # type: ignore
 
-    # Local dev convenience (optional, not required in production envs)
-    app_login_user: str = Field("test", alias="APP_LOGIN_USER")
-    app_login_pass: str = Field("test_user", alias="APP_LOGIN_PASS")
+        if key in st.secrets:
+            value = st.secrets.get(key)
+            if value is not None:
+                return str(value)
+    except Exception:
+        pass
+    return os.getenv(key, default)
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-        env_prefix="",
-    )
+
+class Settings:
+    """Minimal settings holder with convenient defaults."""
+
+    def __init__(self) -> None:
+        self.mongodb_host: Optional[str] = _get_secret("MONGODB_HOST")
+        if not self.mongodb_host:
+            raise ValueError(
+                "MONGODB_HOST is not set. Provide it via Streamlit secrets or env."
+            )
+
+        self.openai_api_key: Optional[str] = _get_secret("OPENAI_API_KEY")
+
+        # Local dev convenience (optional). Defaults are blank strings.
+        self.app_login_user: str = _get_secret("APP_LOGIN_USER", "") or ""
+        self.app_login_pass: str = _get_secret("APP_LOGIN_PASS", "") or ""
+
+    # Read-only properties backed by module-level constants below.
+    @property
+    def log_level(self) -> str:
+        return "DEBUG"
+
+    @property
+    def mongodb_db(self) -> str:
+        return "chatbot"
+
+    @property
+    def mongodb_vector_index(self) -> str:
+        return "vector_index"
+
+    @property
+    def mongodb_search_index(self) -> str:
+        return "vgs_text"
+
+    @property
+    def embedding_model_name(self) -> str:
+        return "snowflake/snowflake-arctic-embed-xs"
+
+    @property
+    def retrieval_top_k(self) -> int:
+        return 10
+
+    @property
+    def retrieval_num_candidates(self) -> int:
+        return 400
+
+    @property
+    def graph_max_hops(self) -> int:
+        return 1
+
+    @property
+    def graph_max_candidates(self) -> int:
+        return 300
 
     def build_srv_uri(self, username: str, password: str) -> str:
         """Return an SRV connection string for MongoDB Atlas.
@@ -49,70 +106,9 @@ class Settings(BaseSettings):
             "/?retryWrites=true&w=majority&appName=vgs-chatbot"
         )
 
-    # Read-only properties backed by module-level constants below. These are
-    # not environment-driven and represent non-secret application defaults.
-
-    @property
-    def mongodb_db(self) -> str:  # database name
-        return DEFAULT_DB_NAME
-
-    @property
-    def mongodb_vector_index(self) -> str:  # Atlas Vector Search index name
-        return DEFAULT_VECTOR_INDEX
-
-    @property
-    def mongodb_search_index(self) -> str:  # Atlas Search (text) index name
-        return DEFAULT_SEARCH_INDEX
-
-    @property
-    def embedding_model_name(self) -> str:  # FastEmbed model identifier
-        return DEFAULT_EMBEDDING_MODEL
-
-    @property
-    def retrieval_top_k(self) -> int:
-        return DEFAULT_RETRIEVAL_TOP_K
-
-    @property
-    def retrieval_num_candidates(self) -> int:
-        return DEFAULT_RETRIEVAL_NUM_CANDIDATES
-
-    @property
-    def graph_max_hops(self) -> int:
-        return DEFAULT_GRAPH_MAX_HOPS
-
-    @property
-    def graph_max_candidates(self) -> int:
-        return DEFAULT_GRAPH_MAX_CANDIDATES
-
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return cached settings instance.
-
-    Returns:
-        Settings: Singleton application settings object.
-    """
+    """Return cached settings instance."""
     logger.debug("Fetching application settings.")
-    # Settings is populated from environment variables by pydantic BaseSettings at runtime,
-    # but static type checkers may still require constructor arguments for the fields;
-    # silence that with a type-ignore for arg-type.
-    return Settings()  # type: ignore[arg-type]
-
-
-# ------------------
-# Non-secret defaults
-# ------------------
-
-# MongoDB names
-DEFAULT_DB_NAME = "vgs"
-DEFAULT_VECTOR_INDEX = "vgs_vector"
-DEFAULT_SEARCH_INDEX = "vgs_text"
-
-# Embeddings
-DEFAULT_EMBEDDING_MODEL = "snowflake/snowflake-arctic-embed-xs"
-
-# Retrieval parameters
-DEFAULT_RETRIEVAL_TOP_K = 10
-DEFAULT_RETRIEVAL_NUM_CANDIDATES = 400
-DEFAULT_GRAPH_MAX_HOPS = 1
-DEFAULT_GRAPH_MAX_CANDIDATES = 300
+    return Settings()

@@ -38,7 +38,7 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Edit `.env` with the Atlas host and optional OpenAI API key. The application reads:
+Edit `.streamlit/secrets.toml` with the Atlas host and optional OpenAI API key. The application reads:
 
 - `MONGODB_HOST` – Atlas SRV host (without the `mongodb+srv://` prefix)
 - `OPENAI_API_KEY` – optional; enables generative answers instead of the extractive fallback

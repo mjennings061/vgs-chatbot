@@ -52,7 +52,15 @@ def main() -> None:
         None: The Streamlit framework handles rendering side effects.
     """
     _ensure_state()
-    settings = get_settings()
+    try:
+        settings = get_settings()
+    except Exception as exc:
+        st.error(
+            "Configuration error: missing or invalid settings.\n\n"
+            "Set `MONGODB_HOST` (and optionally `OPENAI_API_KEY`). In Streamlit Cloud, add them to Secrets or Environment Variables."
+        )
+        st.caption(str(exc))
+        st.stop()
     st.title("RAF 2FTS Knowledge Assistant")
 
     if st.session_state["logged_in"]:
@@ -108,10 +116,8 @@ def main() -> None:
 
 if __name__ == "__main__":
     # Configure root logging once when launched directly.
-    # Honour LOG_LEVEL env var if set, defaulting to INFO for user-friendly output.
-    import os
-
-    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    settings = get_settings()
+    log_level = settings.log_level
     # Keep the root logger quiet to avoid third‑party noise; elevate our modules explicitly.
     logging.basicConfig(
         level=logging.WARNING,
