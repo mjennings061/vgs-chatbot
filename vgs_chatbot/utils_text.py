@@ -189,3 +189,22 @@ def _split_long_paragraph(text: str, target_chars: int, overlap: int) -> List[st
         len(segments),
     )
     return segments
+
+
+def clean_title(title: str) -> str:
+    """Return a display-friendly title by stripping boilerplate and placeholders.
+
+    - Removes phrases like "UNCONTROLLED COPY WHEN PRINTED".
+    - Normalises placeholder headings like "X X X" to "General".
+    - Collapses repeated whitespace and trims common separators.
+    """
+    t = (title or "").strip()
+    if not t:
+        return t
+    t = re.sub(r"\bUNCONTROLLED COPY WHEN PRINTED\b", "", t, flags=re.IGNORECASE)
+    # Placeholder headings such as "X X X"
+    if re.fullmatch(r"(?i)(x\s+){2,}x", t):
+        return "General"
+    # Collapse spaces and trim separators
+    t = re.sub(r"\s{2,}", " ", t).strip(" \t-–·:·")
+    return t or title
