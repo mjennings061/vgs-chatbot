@@ -10,6 +10,7 @@ from bson import ObjectId
 from gridfs import GridFS
 from pymongo.collection import Collection
 
+from vgs_chatbot.config import get_settings
 from vgs_chatbot.db import get_collections, get_gridfs
 from vgs_chatbot.embeddings import get_embedder
 from vgs_chatbot.ingest import ingest_file
@@ -153,6 +154,11 @@ def main() -> None:
     collections: CollectionsMap = get_collections(client)
     fs: GridFS = get_gridfs(client)
     embedder = get_embedder()
+
+    # Connection details are now presented on the Admin page
+    settings = get_settings()
+    with st.expander("Connection details"):
+        st.write(f"MongoDB host: `{settings.mongodb_host}`")
 
     st.subheader("Upload")
     uploaded = st.file_uploader("Select a PDF or Word document", type=["pdf", "docx"])

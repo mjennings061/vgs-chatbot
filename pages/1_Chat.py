@@ -55,13 +55,10 @@ def main() -> None:
     embedder = get_embedder()
     st.session_state.setdefault("chat_history", [])
 
-    with st.form("chat-form", clear_on_submit=True):
-        question = st.text_area(
-            "Question", placeholder="e.g. What are the wind limits?"
-        )
-        submitted = st.form_submit_button("Ask")
+    # Use chat-style input that submits on Enter
+    question = st.chat_input(placeholder="Ask a question… e.g. wind limits")
 
-    if submitted and question.strip():
+    if question and question.strip():
         clean_question = question.strip()
         logger.info("Received chat question: '%s'", clean_question)
         with st.spinner("Retrieving context…"):
