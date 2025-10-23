@@ -102,6 +102,7 @@ uv run streamlit run streamlit_app.py
 - When `OPENAI_API_KEY` is unset, responses fall back to the highest scoring chunk extract.
 
 ## Development tasks
+
 - Format and lint: `uv run ruff format .` then `uv run ruff check .`
 - Imports: `uv run isort .`
 - Run the local hooks: `uv run pre-commit run --all-files`
