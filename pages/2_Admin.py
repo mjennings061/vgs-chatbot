@@ -14,6 +14,7 @@ from vgs_chatbot.config import get_settings
 from vgs_chatbot.db import get_collections, get_gridfs
 from vgs_chatbot.embeddings import get_embedder
 from vgs_chatbot.ingest import ingest_file
+from vgs_chatbot.utils_text import clean_title
 
 CollectionsMap = Dict[str, Collection]
 
@@ -238,12 +239,13 @@ def main() -> None:
 
     for index, doc in enumerate(documents):
         with st.container():
-            title = (
+            raw_title = (
                 doc.get("title")
                 or doc.get("doc_title")
                 or doc.get("filename")
                 or "Untitled"
             )
+            title = clean_title(raw_title)
             st.markdown(f"### {title}")
             st.write(
                 f"File: `{doc['filename']}` · Type: {doc.get('doc_type', 'unknown')}"

@@ -32,8 +32,8 @@ class Settings(BaseSettings):
     )
     openai_api_key: Optional[str] = Field(None, alias="OPENAI_API_KEY")
 
-    retrieval_top_k: int = Field(6, ge=1, lt=20)
-    retrieval_num_candidates: int = Field(90, ge=10, lt=400)
+    retrieval_top_k: int = Field(10, ge=1, lt=50)
+    retrieval_num_candidates: int = Field(400, ge=10, lt=1200)
     graph_max_hops: int = Field(1, ge=0, le=2)
     graph_max_candidates: int = Field(300, ge=0, le=2000)
 
@@ -68,4 +68,7 @@ def get_settings() -> Settings:
         Settings: Singleton application settings object.
     """
     logger.debug("Fetching application settings.")
-    return Settings()
+    # Settings is populated from environment variables by pydantic BaseSettings at runtime,
+    # but static type checkers may still require constructor arguments for the fields;
+    # silence that with a type-ignore for arg-type.
+    return Settings()  # type: ignore[arg-type]
