@@ -1,0 +1,4 @@
+- [ ] Test CRUD with a small document
+- [ ] Test uploading the DHOs
+- [ ] Library is empty, but the chatbot DB has an `fs.files` collection
+- [ ] Instead of using the DB user `chatbot` to authenticate, use the existing schema in chatbot/users where there are two hashed users as examples

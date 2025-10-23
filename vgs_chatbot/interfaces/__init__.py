@@ -1,1 +1,0 @@
-"""Interfaces package for dependency inversion."""

@@ -1,0 +1,8 @@
+{
+  "include": ["vgs_chatbot", "streamlit_app.py", "pages"],
+  "pythonVersion": "3.13",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": "warning",
+  "reportUnusedImport": "warning",
+  "stubPath": "typings"
+}
