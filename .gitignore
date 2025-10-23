@@ -14,3 +14,5 @@ __pycache__/
 uv.lock
 .uv/
 .streamlit/secrets.toml
+data/
+vector_database/

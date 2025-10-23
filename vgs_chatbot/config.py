@@ -19,23 +19,13 @@ logger = logging.getLogger(__name__)
 class Settings(BaseSettings):
     """Centralised configuration backed by environment variables."""
 
+    # Keep only necessary environment variables
     mongodb_host: str = Field(..., alias="MONGODB_HOST")
-    mongodb_db: str = Field("vgs", alias="MONGODB_DB")
-    mongodb_vector_index: str = Field("vgs_vector", alias="MONGODB_VECTOR_INDEX")
-    mongodb_search_index: str = Field("vgs_text", alias="MONGODB_SEARCH_INDEX")
-
-    app_login_user: str = Field("test", alias="APP_LOGIN_USER")
-    app_login_pass: str = Field("test_user", alias="APP_LOGIN_PASS")
-
-    embedding_model_name: str = Field(
-        "snowflake/snowflake-arctic-embed-xs", alias="EMBEDDING_MODEL_NAME"
-    )
     openai_api_key: Optional[str] = Field(None, alias="OPENAI_API_KEY")
 
-    retrieval_top_k: int = Field(10, ge=1, lt=50)
-    retrieval_num_candidates: int = Field(400, ge=10, lt=1200)
-    graph_max_hops: int = Field(1, ge=0, le=2)
-    graph_max_candidates: int = Field(300, ge=0, le=2000)
+    # Local dev convenience (optional, not required in production envs)
+    app_login_user: str = Field("test", alias="APP_LOGIN_USER")
+    app_login_pass: str = Field("test_user", alias="APP_LOGIN_PASS")
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -59,6 +49,41 @@ class Settings(BaseSettings):
             "/?retryWrites=true&w=majority&appName=vgs-chatbot"
         )
 
+    # Read-only properties backed by module-level constants below. These are
+    # not environment-driven and represent non-secret application defaults.
+
+    @property
+    def mongodb_db(self) -> str:  # database name
+        return DEFAULT_DB_NAME
+
+    @property
+    def mongodb_vector_index(self) -> str:  # Atlas Vector Search index name
+        return DEFAULT_VECTOR_INDEX
+
+    @property
+    def mongodb_search_index(self) -> str:  # Atlas Search (text) index name
+        return DEFAULT_SEARCH_INDEX
+
+    @property
+    def embedding_model_name(self) -> str:  # FastEmbed model identifier
+        return DEFAULT_EMBEDDING_MODEL
+
+    @property
+    def retrieval_top_k(self) -> int:
+        return DEFAULT_RETRIEVAL_TOP_K
+
+    @property
+    def retrieval_num_candidates(self) -> int:
+        return DEFAULT_RETRIEVAL_NUM_CANDIDATES
+
+    @property
+    def graph_max_hops(self) -> int:
+        return DEFAULT_GRAPH_MAX_HOPS
+
+    @property
+    def graph_max_candidates(self) -> int:
+        return DEFAULT_GRAPH_MAX_CANDIDATES
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
@@ -72,3 +97,22 @@ def get_settings() -> Settings:
     # but static type checkers may still require constructor arguments for the fields;
     # silence that with a type-ignore for arg-type.
     return Settings()  # type: ignore[arg-type]
+
+
+# ------------------
+# Non-secret defaults
+# ------------------
+
+# MongoDB names
+DEFAULT_DB_NAME = "vgs"
+DEFAULT_VECTOR_INDEX = "vgs_vector"
+DEFAULT_SEARCH_INDEX = "vgs_text"
+
+# Embeddings
+DEFAULT_EMBEDDING_MODEL = "snowflake/snowflake-arctic-embed-xs"
+
+# Retrieval parameters
+DEFAULT_RETRIEVAL_TOP_K = 10
+DEFAULT_RETRIEVAL_NUM_CANDIDATES = 400
+DEFAULT_GRAPH_MAX_HOPS = 1
+DEFAULT_GRAPH_MAX_CANDIDATES = 300

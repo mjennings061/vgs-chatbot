@@ -3,6 +3,7 @@
 A Streamlit application that lets RAF 2FTS instructors explore Viking training material through a knowledge-graph assisted RAG pipeline. Admins can upload documents, the chatbot cites its answers, and MongoDB Atlas stores the full corpus.
 
 ## Features
+
 - Streamlit login screen backed by MongoDB Atlas demo credentials stored in `.env`.
 - Document ingestion for PDF and DOCX files with progress reporting; sources live in GridFS.
 - Automatic section detection, ~900 character chunking, and FastEmbed embeddings.
@@ -11,6 +12,7 @@ A Streamlit application that lets RAF 2FTS instructors explore Viking training m
 - Optional OpenAI `gpt-4o-mini` generation with an extractive fallback when the API key is absent.
 
 ## Prerequisites
+
 - Python 3.13 (tested with CPython 3.13.9)
 - [`uv`](https://docs.astral.sh/uv/) for dependency and virtualenv management
 - MongoDB Atlas cluster with Search and Vector Search enabled
@@ -22,24 +24,27 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
 ## Setup
+
 ```bash
 uv venv
 uv sync
 cp .env.example .env
 ```
 
-Edit `.env` with the Atlas host, demo credentials, and optional OpenAI API key. The application reads:
+Edit `.env` with the Atlas host and optional OpenAI API key. The application reads:
 
 - `MONGODB_HOST` – Atlas SRV host (without the `mongodb+srv://` prefix)
-- `MONGODB_DB` – database name for documents (`vgs` by default)
-- `MONGODB_VECTOR_INDEX` – Atlas Vector Search index on `doc_chunks.embedding`
-- `MONGODB_SEARCH_INDEX` – Atlas Search (text) index on `doc_chunks`
-- `APP_LOGIN_USER` / `APP_LOGIN_PASS` – demo credentials shown on the login form
-- `EMBEDDING_MODEL_NAME` – FastEmbed model name (`snowflake/snowflake-arctic-embed-xs`)
 - `OPENAI_API_KEY` – optional; enables generative answers instead of the extractive fallback
+- `LOG_LEVEL` – optional; adjusts app logging (`INFO` by default)
+
+Local development convenience (not required in production):
+
+- `APP_LOGIN_USER` / `APP_LOGIN_PASS` – shown on the login form if present
 
 ## Prepare MongoDB Atlas
+
 Create a database (for example `vgs`) and let the app create the collections on first use:
+
 - `documents` – metadata for each uploaded file
 - `doc_chunks` – embedded text chunks with section and page references
 - `kg_nodes` / `kg_edges` – knowledge graph nodes and associations
@@ -82,6 +87,7 @@ Atlas Search (`doc_chunks`, name `vgs_text`)
 ```
 
 ## Running the app
+
 ```bash
 uv run streamlit run streamlit_app.py
 ```
