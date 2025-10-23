@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List
 
 import streamlit as st
@@ -15,12 +16,21 @@ from vgs_chatbot.ingest import ingest_file
 
 CollectionsMap = Dict[str, Collection]
 
+logger = logging.getLogger(__name__)
+
 
 def _require_login() -> None:
+    """Ensure the admin view is only accessible to signed-in users.
+
+    Returns:
+        None: Uses Streamlit control flow to stop unauthenticated sessions.
+    """
     if not st.session_state.get("logged_in"):
+        logger.warning("Unauthenticated access attempt to admin page.")
         st.error("Please sign in on the Home page before using the admin tools.")
         st.stop()
     if "mongo_client" not in st.session_state:
+        logger.error("Streamlit session missing MongoDB client for admin page.")
         st.error("Connection not found. Please sign in again.")
         st.stop()
 
@@ -31,6 +41,17 @@ def _delete_document(
     doc_id: ObjectId | None,
     gridfs_id: ObjectId,
 ) -> None:
+    """Remove a document, related chunks, and the stored GridFS binary.
+
+    Args:
+        collections: MongoDB collections used by the application.
+        fs: GridFS bucket storing source documents.
+        doc_id: Identifier of the document metadata entry.
+        gridfs_id: GridFS identifier for the binary data.
+
+    Returns:
+        None: Side effects occur through MongoDB operations.
+    """
     doc = None
     if doc_id:
         doc = collections["documents"].find_one({"_id": doc_id})
@@ -54,12 +75,22 @@ def _delete_document(
         collections["documents"].delete_one({"_id": doc_id})
 
     try:
+        logger.info("Deleting GridFS file '%s'.", gridfs_id)
         fs.delete(gridfs_id)
     except Exception:  # noqa: BLE001 - GridFS delete best effort
         st.warning("Failed to remove GridFS file; please check the database.")
+        logger.exception("Failed to delete GridFS file '%s'.", gridfs_id)
 
 
-def _list_documents(collections: CollectionsMap, fs: GridFS) -> List[Dict[str, Any]]:
+def _list_documents(collections: CollectionsMap) -> List[Dict[str, Any]]:
+    """Build a list of documents enriched with metadata and chunk counts.
+
+    Args:
+        collections: MongoDB collection map used for lookups.
+
+    Returns:
+        list[dict[str, Any]]: Documents with presentation-ready fields.
+    """
     files_collection: Collection = collections["documents"].database["fs.files"]
     files: List[Dict[str, Any]] = list(files_collection.find().sort("uploadDate", -1))
     if not files:
@@ -109,7 +140,11 @@ def _list_documents(collections: CollectionsMap, fs: GridFS) -> List[Dict[str, A
 
 
 def main() -> None:
-    """Render admin tools for document management."""
+    """Render admin tools for document management.
+
+    Returns:
+        None: Streamlit renders and controls navigation.
+    """
     _require_login()
     st.title("Document Admin")
     st.caption("Upload or remove Viking training documents for retrieval.")
@@ -135,7 +170,18 @@ def main() -> None:
                 def report(
                     stage: str, current: int | None = None, total: int | None = None
                 ) -> None:
+                    """Update Streamlit progress widgets and log stage changes.
+
+                    Args:
+                        stage: Name of the ingestion stage being reported.
+                        current: Current progress within the stage.
+                        total: Total units of work for the stage if known.
+
+                    Returns:
+                        None: Updates UI widgets and logs without producing a value.
+                    """
                     if stage != last_stage["name"]:
+                        logger.debug("Ingestion stage -> %s", stage)
                         if total and total > 0:
                             progress_bar.progress(0)
                         last_stage["name"] = stage
@@ -163,16 +209,23 @@ def main() -> None:
                         progress_callback=report,
                     )
                 except Exception as exc:  # noqa: BLE001 - surface ingestion error
+                    logger.exception("Ingestion failed for '%s'.", uploaded.name)
                     st.error("Ingestion failed. Please review the logs and try again.")
                     st.caption(f"Reason: {exc}")
                 else:
+                    logger.info(
+                        "Ingestion completed for '%s': chunks=%s, pages=%s",
+                        uploaded.name,
+                        result.chunk_count,
+                        result.page_count,
+                    )
                     st.success(
                         f"Ingested {result.chunk_count} chunks across {result.page_count} pages."
                     )
                     st.rerun()
 
     st.subheader("Library")
-    documents = _list_documents(collections, fs)
+    documents = _list_documents(collections)
     if not documents:
         st.info("No documents ingested yet.")
         return
@@ -194,6 +247,7 @@ def main() -> None:
             with col1:
                 delete_key = doc.get("doc_id") or doc["gridfs_id"]
                 if st.button("Delete", key=f"delete-{delete_key}"):
+                    logger.info("Deleting document '%s'.", delete_key)
                     _delete_document(
                         collections, fs, doc.get("doc_id"), doc["gridfs_id"]
                     )

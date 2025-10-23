@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, List, Optional, Tuple
@@ -13,6 +14,8 @@ from pymongo.collection import Collection
 from vgs_chatbot.embeddings import FastEmbedder
 from vgs_chatbot.kg import extract_keyphrases, upsert_nodes_edges
 from vgs_chatbot.utils_text import chunk_text, detect_sections, read_docx, read_pdf
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -40,16 +43,53 @@ def ingest_file(
         Callable[[str, Optional[int], Optional[int]], None]
     ] = None,
 ) -> IngestResult:
-    """Store a document, chunk it, embed it, and update the knowledge graph."""
+    """Store a document, chunk it, embed it, and update the knowledge graph.
+
+    Args:
+        fs: GridFS bucket that stores the uploaded document bytes.
+        documents: MongoDB collection for document metadata.
+        doc_chunks: Collection storing chunked content and embeddings.
+        kg_nodes: Knowledge graph nodes collection.
+        kg_edges: Knowledge graph edges collection.
+        embedder: Embedder used for passage embeddings.
+        file_bytes: Raw bytes of the uploaded document.
+        filename: Human-readable file name.
+        content_type: MIME type captured at upload time.
+        uploaded_by: Username responsible for the upload.
+        progress_callback: Optional progress hook for UI updates.
+
+    Returns:
+        IngestResult: Summary of the ingestion run.
+    """
 
     def notify(
         stage: str, current: Optional[int] = None, total: Optional[int] = None
     ) -> None:
+        """Forward progress updates to optional callback and log transitions.
+
+        Args:
+            stage: Name of the ingestion stage being reported.
+            current: Current progress step for the stage.
+            total: Total steps expected for the stage.
+
+        Returns:
+            None: Performs logging and optional callback invocation.
+        """
         if progress_callback:
             progress_callback(stage, current, total)
+        if total is not None and current is not None:
+            logger.debug("Ingestion stage '%s': %s/%s", stage, current, total)
+        else:
+            logger.debug("Ingestion stage '%s' updated.", stage)
 
     doc_type = _detect_doc_type(filename, content_type)
     title = filename.rsplit(".", 1)[0]
+    logger.info(
+        "Starting ingestion for '%s' detected as '%s' uploaded by '%s'.",
+        filename,
+        doc_type,
+        uploaded_by,
+    )
     notify("Uploading document")
     grid_id = fs.put(file_bytes, filename=filename, content_type=content_type)
     document = {
@@ -122,6 +162,12 @@ def ingest_file(
             notify("Updating knowledge graph", index, total_chunks)
 
     notify("Completed ingestion")
+    logger.info(
+        "Completed ingestion for '%s': pages=%s chunks=%s",
+        filename,
+        len(pages),
+        len(chunk_docs),
+    )
 
     return IngestResult(
         document_id=doc_id,
@@ -131,7 +177,15 @@ def ingest_file(
 
 
 def _detect_doc_type(filename: str, content_type: str) -> str:
-    """Infer document type from filename or MIME type."""
+    """Infer document type from filename or MIME type.
+
+    Args:
+        filename: Name of the uploaded file.
+        content_type: MIME type reported by the uploader.
+
+    Returns:
+        str: Normalised document type indicator.
+    """
     lowered = filename.lower()
     if lowered.endswith(".pdf") or content_type == "application/pdf":
         return "pdf"
@@ -141,7 +195,15 @@ def _detect_doc_type(filename: str, content_type: str) -> str:
 
 
 def _load_pages(doc_type: str, file_bytes: bytes) -> List[Tuple[int, str]]:
-    """Load pages based on document type."""
+    """Load pages based on document type.
+
+    Args:
+        doc_type: Normalised document type (pdf, docx, unknown).
+        file_bytes: Raw file contents.
+
+    Returns:
+        list[tuple[int, str]]: Sequence of page numbers and extracted text.
+    """
     if doc_type == "pdf":
         return read_pdf(file_bytes)
     if doc_type == "docx":

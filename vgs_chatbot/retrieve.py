@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set
 
@@ -11,6 +12,8 @@ from pymongo.collection import Collection
 from vgs_chatbot.config import get_settings
 from vgs_chatbot.embeddings import FastEmbedder
 from vgs_chatbot.kg import expand_candidate_chunk_ids, extract_keyphrases
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,7 +31,11 @@ class RetrievedChunk:
     source_scores: Dict[str, float] = field(default_factory=dict)
 
     def as_citation(self) -> Dict[str, str | int]:
-        """Return citation metadata for UI rendering."""
+        """Return citation metadata for UI rendering.
+
+        Returns:
+            dict[str, str | int]: Minimal metadata for citation display.
+        """
         return {
             "chunk_id": str(self.chunk_id),
             "document": self.doc_title,
@@ -45,12 +52,25 @@ def retrieve_chunks(
     embedder: FastEmbedder,
     query: str,
 ) -> List[RetrievedChunk]:
-    """Run GraphRAG-lite retrieval for a user query."""
+    """Run GraphRAG-lite retrieval for a user query.
+
+    Args:
+        doc_chunks: Collection containing chunk documents.
+        kg_nodes: Knowledge graph nodes collection.
+        kg_edges: Knowledge graph edges collection.
+        embedder: Embedder used for vector search queries.
+        query: User question driving retrieval.
+
+    Returns:
+        list[RetrievedChunk]: Ranked retrieval results.
+    """
     if not query.strip():
+        logger.warning("retrieve_chunks invoked with empty query.")
         return []
 
     settings = get_settings()
     phrases = extract_keyphrases(query, max_k=5)
+    logger.debug("Query '%s' produced %s keyphrases.", query, len(phrases))
     candidate_ids = expand_candidate_chunk_ids(
         nodes=kg_nodes,
         edges=kg_edges,
@@ -58,6 +78,7 @@ def retrieve_chunks(
         max_hops=settings.graph_max_hops,
         max_candidates=settings.graph_max_candidates,
     )
+    logger.debug("Candidate set contains %s chunk ids.", len(candidate_ids))
 
     query_vector = embedder.embed_query(query)
     filter_expr = None
@@ -81,7 +102,15 @@ def retrieve_chunks(
         text_hits=text_hits,
         kg_bonus_ids=candidate_ids,
     )
-    return fused[: settings.retrieval_top_k]
+    limited = fused[: settings.retrieval_top_k]
+    logger.info(
+        "Retrieve returned %s chunks (vector=%s, text=%s, query='%s').",
+        len(limited),
+        len(vector_hits),
+        len(text_hits),
+        query,
+    )
+    return limited
 
 
 def _vector_search(
@@ -92,6 +121,18 @@ def _vector_search(
     num_candidates: int,
     filter_expr: Optional[dict],
 ) -> List[dict]:
+    """Run MongoDB Atlas Vector Search and return raw hits.
+
+    Args:
+        collection: MongoDB collection containing chunk documents.
+        query_vector: Embedding vector for the user query.
+        limit: Maximum number of results to return.
+        num_candidates: Number of candidate vectors examined by Atlas.
+        filter_expr: Optional filter to restrict searched documents.
+
+    Returns:
+        list[dict]: Aggregation results with vector scores.
+    """
     settings = get_settings()
     stage = {
         "$vectorSearch": {
@@ -120,7 +161,14 @@ def _vector_search(
             }
         },
     ]
-    return list(collection.aggregate(pipeline))
+    results = list(collection.aggregate(pipeline))
+    logger.debug(
+        "Vector search returned %s hits (limit=%s, candidates=%s).",
+        len(results),
+        limit,
+        num_candidates,
+    )
+    return results
 
 
 def _text_search(
@@ -129,6 +177,16 @@ def _text_search(
     query: str,
     limit: int,
 ) -> List[dict]:
+    """Execute Atlas full-text search and return raw hits.
+
+    Args:
+        collection: MongoDB collection containing chunk documents.
+        query: User query string used for text search.
+        limit: Maximum number of results to return.
+
+    Returns:
+        list[dict]: Aggregation results with text scores.
+    """
     settings = get_settings()
     pipeline = [
         {
@@ -155,7 +213,9 @@ def _text_search(
             }
         },
     ]
-    return list(collection.aggregate(pipeline))
+    results = list(collection.aggregate(pipeline))
+    logger.debug("Text search returned %s hits (limit=%s).", len(results), limit)
+    return results
 
 
 def _fuse_results(
@@ -164,6 +224,16 @@ def _fuse_results(
     text_hits: List[dict],
     kg_bonus_ids: Set[ObjectId],
 ) -> List[RetrievedChunk]:
+    """Fuse vector, text, and knowledge graph signals.
+
+    Args:
+        vector_hits: Ranked results from vector search.
+        text_hits: Ranked results from text search.
+        kg_bonus_ids: Candidate chunk identifiers from the knowledge graph.
+
+    Returns:
+        list[RetrievedChunk]: Deduplicated and scored retrieval results.
+    """
     fused: Dict[ObjectId, RetrievedChunk] = {}
 
     for item in vector_hits:
@@ -188,10 +258,26 @@ def _fuse_results(
             )
             fused[chunk_id].score += 0.1
 
-    return sorted(fused.values(), key=lambda chunk: chunk.score, reverse=True)
+    fused_list = sorted(fused.values(), key=lambda chunk: chunk.score, reverse=True)
+    logger.debug(
+        "Fusion produced %s combined results (vector=%s, text=%s, kg_bonus=%s).",
+        len(fused_list),
+        len(vector_hits),
+        len(text_hits),
+        len(kg_bonus_ids),
+    )
+    return fused_list
 
 
 def _make_chunk(item: dict) -> RetrievedChunk:
+    """Create a `RetrievedChunk` instance from a MongoDB document.
+
+    Args:
+        item: Raw MongoDB result.
+
+    Returns:
+        RetrievedChunk: Structured retrieval item with default scores.
+    """
     return RetrievedChunk(
         chunk_id=item.get("_id"),
         doc_id=item.get("doc_id"),

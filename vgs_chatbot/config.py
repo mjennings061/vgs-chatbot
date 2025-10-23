@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from typing import Optional
 
@@ -11,6 +12,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Load .env early so local development mirrors deployed environments.
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -42,7 +45,15 @@ class Settings(BaseSettings):
     )
 
     def build_srv_uri(self, username: str, password: str) -> str:
-        """Return an SRV connection string for MongoDB Atlas."""
+        """Return an SRV connection string for MongoDB Atlas.
+
+        Args:
+            username: Database username supplied by the end user.
+            password: Database password matching the username.
+
+        Returns:
+            str: MongoDB SRV connection string targeting the configured host.
+        """
         return (
             f"mongodb+srv://{username}:{password}@{self.mongodb_host}"
             "/?retryWrites=true&w=majority&appName=vgs-chatbot"
@@ -51,5 +62,10 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return cached settings instance."""
+    """Return cached settings instance.
+
+    Returns:
+        Settings: Singleton application settings object.
+    """
+    logger.debug("Fetching application settings.")
     return Settings()
