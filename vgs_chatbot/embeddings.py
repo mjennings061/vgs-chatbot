@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from typing import Iterable, List, Sequence
+from typing import Any, Iterable, List, Sequence, cast
 
 from fastembed import TextEmbedding
 
@@ -23,7 +23,10 @@ def _to_python_floats(vector: Iterable[float]) -> List[float]:
         list[float]: Cleaned list suitable for MongoDB storage.
     """
     if hasattr(vector, "tolist"):
-        raw = vector.tolist()
+        # Cast to Any so static type checkers stop complaining about unknown
+        # attributes on the declared Iterable type; at runtime this calls the
+        # .tolist() method on array-like objects (e.g. numpy arrays).
+        raw = cast(Any, vector).tolist()
         if isinstance(raw, list):
             return [float(value) for value in raw]
         return [float(raw)]

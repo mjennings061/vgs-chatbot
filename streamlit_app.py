@@ -41,6 +41,8 @@ def _ensure_state() -> None:
     st.session_state.setdefault("logged_in", False)
     st.session_state.setdefault("username", "")
     st.session_state.setdefault("chat_history", [])
+    # Tracks whether we've already redirected to Chat after a fresh login
+    st.session_state.setdefault("redirected_after_login", False)
 
 
 def main() -> None:
@@ -54,6 +56,15 @@ def main() -> None:
     st.title("RAF 2FTS Knowledge Assistant")
 
     if st.session_state["logged_in"]:
+        # After a successful login, automatically take users to the Chat page once.
+        if not st.session_state.get("redirected_after_login"):
+            st.session_state["redirected_after_login"] = True
+            try:
+                st.switch_page("pages/1_Chat.py")
+            except Exception:
+                # Fallback to existing behaviour if switching pages is unavailable.
+                pass
+
         st.success("Signed in. Use the sidebar to open Chat or Admin.")
         if st.button("Sign out"):
             logger.info(
@@ -61,8 +72,6 @@ def main() -> None:
             )
             _reset_session()
             st.rerun()
-        with st.expander("Connection details"):
-            st.write(f"MongoDB host: `{settings.mongodb_host}`")
         st.stop()
 
     st.write(
@@ -93,6 +102,7 @@ def main() -> None:
         st.session_state["logged_in"] = True
         st.session_state["username"] = username_input
         st.session_state["mongo_client"] = client
+        st.session_state["redirected_after_login"] = False
         st.rerun()
 
 
