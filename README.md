@@ -1,237 +1,114 @@
 # VGS Chatbot
 
-A modern, locally-hosted chatbot that connects to SharePoint to access 2FTS documentation using SOLID design principles and a RAG (Retrieval-Augmented Generation) architecture.
+A Streamlit application that lets RAF 2FTS instructors explore Viking training material through a knowledge-graph assisted RAG pipeline. Admins can upload documents, the chatbot cites its answers, and MongoDB Atlas stores the full corpus.
 
 ## Features
+- Streamlit login screen backed by MongoDB Atlas demo credentials stored in `.env`.
+- Document ingestion for PDF and DOCX files with progress reporting; sources live in GridFS.
+- Automatic section detection, ~900 character chunking, and FastEmbed embeddings.
+- Lightweight knowledge graph that links keyphrases to chunk candidates.
+- Retrieval that fuses Atlas Vector Search, Atlas Search (BM25), and graph priors before answering.
+- Optional OpenAI `gpt-4o-mini` generation with an extractive fallback when the API key is absent.
 
-- **RAG Pipeline**: Advanced document processing and semantic search
-- **User Authentication**: PostgreSQL-backed user management
-- **Modern Architecture**: SOLID principles with dependency injection
-- **Web Interface**: Streamlit-based chat interface
-- **Docker Support**: Containerized deployment
+## Prerequisites
+- Python 3.13 (tested with CPython 3.13.9)
+- [`uv`](https://docs.astral.sh/uv/) for dependency and virtualenv management
+- MongoDB Atlas cluster with Search and Vector Search enabled
 
-## Architecture
+Install `uv` if you do not already have it:
 
-The application follows SOLID design principles with clear separation of concerns:
-
-```text
-vgs_chatbot/
-├── interfaces/         # Abstract interfaces for dependency inversion
-├── services/          # Business logic implementations
-├── models/           # Data models and schemas
-├── repositories/     # Data access layer
-├── gui/             # Streamlit web interface
-└── utils/           # Utility functions
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
-
-### Key Components
-
-1. **Authentication Service**: PostgreSQL-backed user login system
-2. **Document Processor**: RAG pipeline for document indexing and search
-3. **Chat Service**: LLM-powered question answering
-4. **Web Interface**: Streamlit-based chatbot application
 
 ## Setup
-
-### Prerequisites
-
-- Python 3.11+
-- Poetry
-- PostgreSQL (or use Docker Compose)
-- OpenAI API key
-
-### Installation
-
-1. **Clone the repository**
-
-   ```bash
-   git clone <repository-url>
-   cd vgs-chatbot
-   ```
-
-2. **Install dependencies**
-
-   ```bash
-   poetry install
-   ```
-
-3. **Configure environment**
-
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-4. **Initialize database**
-
-   ```bash
-   # Using Docker Compose (recommended)
-   docker-compose up -d db
-
-   # Or set up PostgreSQL manually and update DATABASE_URL in .env
-   ```
-
-5. **Run the application**
-
-   ```bash
-   poetry run streamlit run vgs_chatbot/gui/app.py
-   ```
-
-### Docker Deployment
-
-For production deployment:
-
 ```bash
-# Using Docker Compose
-docker-compose up -d
-
-# Or build and run manually
-docker build -t vgs-chatbot .
-docker run -p 8501:8501 vgs-chatbot
+uv venv
+uv sync
+cp .env.example .env
 ```
 
-## Configuration
+Edit `.env` with the Atlas host, demo credentials, and optional OpenAI API key. The application reads:
 
-Key environment variables in `.env`:
+- `MONGODB_HOST` – Atlas SRV host (without the `mongodb+srv://` prefix)
+- `MONGODB_DB` – database name for documents (`vgs` by default)
+- `MONGODB_VECTOR_INDEX` – Atlas Vector Search index on `doc_chunks.embedding`
+- `MONGODB_SEARCH_INDEX` – Atlas Search (text) index on `doc_chunks`
+- `APP_LOGIN_USER` / `APP_LOGIN_PASS` – demo credentials shown on the login form
+- `EMBEDDING_MODEL_NAME` – FastEmbed model name (`snowflake/snowflake-arctic-embed-xs`)
+- `OPENAI_API_KEY` – optional; enables generative answers instead of the extractive fallback
 
-- `DATABASE_URL`: PostgreSQL connection string
-- `JWT_SECRET`: Secret key for JWT tokens
-- `OPENAI_API_KEY`: OpenAI API key
-- `SHAREPOINT_SITE_URL`: Your SharePoint site URL
-- `SHAREPOINT_DIRECTORY_URLS`: Comma-separated list of document directories
+## Prepare MongoDB Atlas
+Create a database (for example `vgs`) and let the app create the collections on first use:
+- `documents` – metadata for each uploaded file
+- `doc_chunks` – embedded text chunks with section and page references
+- `kg_nodes` / `kg_edges` – knowledge graph nodes and associations
+- GridFS buckets `fs.files` / `fs.chunks` – original documents
 
-## Usage
+Configure the indexes before querying:
 
-1. **Register/Login**: Create an account or log in
-2. **Connect to SharePoint**: Provide SharePoint credentials
-3. **Chat**: Ask questions about your documentation
-4. **View Sources**: See which documents were used to generate responses
+Vector Search (`doc_chunks`, name `vgs_vector`)
 
-## Reprocessing & Reindexing Documents (CLI)
+```json
+{
+  "name": "vgs_vector",
+  "type": "vectorSearch",
+  "definition": {
+    "fields": [
+      { "type": "vector", "path": "embedding", "numDimensions": 384, "similarity": "cosine" },
+      { "type": "filter", "path": "_id" },
+      { "type": "filter", "path": "doc_id" },
+      { "type": "filter", "path": "section_id" },
+      { "type": "filter", "path": "page_start" }
+    ]
+  }
+}
+```
 
-After changing the embedding model, chunking logic, or wanting a clean rebuild of the vector store, you can regenerate all embeddings via the built‑in CLI in `vgs_chatbot/services/document_processor.py`.
+Atlas Search (`doc_chunks`, name `vgs_text`)
 
-This script:
+```json
+{
+  "name": "vgs_text",
+  "mappings": {
+    "dynamic": false,
+    "fields": {
+      "text": { "type": "string" },
+      "section_title": { "type": "string" },
+      "doc_title": { "type": "string" }
+    }
+  }
+}
+```
 
-- Deletes the existing Chroma persistent index directory you point it at (if it exists)
-- Scans a documents directory for supported files (PDF, DOCX, XLSX, TXT, MD, etc.)
-- Extracts text, chunks content, generates embeddings with the selected model
-- Rebuilds the Chroma collection from scratch
-
-### When to run it
-
-- After changing the default embedding model (e.g. switching to `multi-qa-MiniLM-L6-cos-v1`)
-- After modifying chunking / extraction logic
-- If the index becomes corrupted or stale
-- Before benchmarking retrieval performance
-
-### Basic usage
-
+## Running the app
 ```bash
-poetry run python vgs_chatbot/services/document_processor.py \
-   --documents-dir data/documents \
-   --persist-dir data/vectors/chroma \
-   --embedding-model multi-qa-MiniLM-L6-cos-v1
+uv run streamlit run streamlit_app.py
 ```
 
-### Arguments
+1. Open the displayed local URL, sign in with the credentials from `.env`, and the home page will confirm the Atlas host in use.
+2. Use the sidebar to open **Chat** or **Admin**.
 
-- `--documents-dir`  Path containing source documents (default: `data/documents`)
-- `--persist-dir`    Path for Chroma persistent store (default: `data/vectors/chroma`)
-- `--embedding-model` SentenceTransformer model name (default: `multi-qa-MiniLM-L6-cos-v1`)
+### Admin workflow
 
-### Notes & Safety
+- Upload a PDF or DOCX file and trigger **Ingest document** to push it to GridFS, create chunks, embed them, and update the knowledge graph.
+- The **Library** section lists stored documents with chunk counts and lets you delete an item (removing GridFS blobs, metadata, and related chunks).
+- Progress bars report ingestion stages, and errors surface friendly messages.
 
-- The script removes the existing directory at `--persist-dir` before rebuilding. Backup if needed.
-- Non-supported file types are skipped gracefully.
-- Large Excel sheets are truncated after 100 data rows per sheet to control index size.
-- Progress / warnings are printed to stdout; consider redirecting to a log file for automation.
+### Chat workflow
 
-### Example (fresh rebuild after model change)
+- Ask a question such as “What are the canopy checks before launch?”.
+- Retrieval expands the query to graph-linked chunks, runs Vector Search and text search, fuses the scores, and shows cited answers (`Document · Section · Page`).
+- When `OPENAI_API_KEY` is unset, responses fall back to the highest scoring chunk extract.
 
-```bash
-poetry run python vgs_chatbot/services/document_processor.py \
-   --embedding-model all-mpnet-base-v2 \
-   --documents-dir /path/to/new_docs \
-   --persist-dir data/vectors/chroma
-```
+## Development tasks
+- Format and lint: `uv run ruff format .` then `uv run ruff check .`
+- Imports: `uv run isort .`
+- Run the local hooks: `uv run pre-commit run --all-files`
 
-### Automating (Makefile snippet)
+The repo ships stub typings for third-party libraries under `typings/` to keep Pyright quiet when desired.
 
-Add to a `Makefile` if desired:
+## Security notes
 
-```makefile
-reindex:
-   poetry run python vgs_chatbot/services/document_processor.py \
-      --documents-dir data/documents \
-      --persist-dir data/vectors/chroma \
-      --embedding-model multi-qa-MiniLM-L6-cos-v1
-```
-
-Then run:
-
-```bash
-make reindex
-```
-
-If you use Docker, you can execute inside the container (ensure volumes are mounted):
-
-```bash
-docker compose exec app poetry run python vgs_chatbot/services/document_processor.py \
-   --documents-dir /app/data/documents \
-   --persist-dir /app/data/vectors/chroma
-```
-
-## Development
-
-### Code Quality
-
-The project uses strict code quality standards:
-
-```bash
-# Run all quality checks
-poetry run isort src/ tests/
-poetry run ruff check src/ tests/
-poetry run mypy src/
-
-# Fix linting issues
-poetry run ruff check --fix src/ tests/
-```
-
-### Testing
-
-```bash
-# Run tests
-poetry run pytest
-
-# Run with coverage
-poetry run pytest --cov=src
-```
-
-### Standards
-
-- **Line length**: 88 characters
-- **Type hints**: Required for all functions
-- **Docstrings**: Google style for public functions
-- **Naming**: snake_case for variables/functions, PascalCase for classes
-
-## SharePoint Integration
-
-The connector supports:
-
-- User-based authentication (no admin rights required)
-- Multiple SharePoint sites and document libraries
-- Recursive directory traversal
-- Support for PDF, DOCX, XLSX files
-- Proper error handling and logging
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Contributing
-
-1. Follow the existing code style and architecture
-2. Add tests for new functionality
-3. Update documentation as needed
-4. Ensure all quality checks pass
+- Demo credentials are intentionally low-privilege. Restrict them to the chatbot database and rotate them frequently.
+- Do not reuse production secrets in `.env`. Use Atlas network rules to limit inbound connections.
