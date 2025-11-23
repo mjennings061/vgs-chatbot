@@ -90,18 +90,6 @@ def ingest_file(
         doc_type,
         uploaded_by,
     )
-    notify("Uploading document")
-    grid_id = fs.put(file_bytes, filename=filename, content_type=content_type)
-    document = {
-        "title": title,
-        "filename": filename,
-        "doc_type": doc_type,
-        "uploaded_by": uploaded_by,
-        "uploaded_at": datetime.now(tz=timezone.utc),
-        "gridfs_id": grid_id,
-    }
-    doc_id = documents.insert_one(document).inserted_id
-
     notify("Loading pages")
     pages = _load_pages(doc_type, file_bytes)
     total_pages = len(pages)
@@ -129,7 +117,6 @@ def ingest_file(
         section_id = section_ids.setdefault(section_key, ObjectId())
         chunk_docs.append(
             {
-                "doc_id": doc_id,
                 "doc_title": title,
                 "section_id": section_id,
                 "section_title": section_key,
@@ -148,18 +135,54 @@ def ingest_file(
         doc["embedding"] = vector
         notify("Embedding chunks", index, total_chunks)
 
-    notify("Saving chunks", 0, total_chunks if total_chunks else None)
-    result = doc_chunks.insert_many(chunk_docs) if chunk_docs else None
-    notify("Saving chunks", total_chunks, total_chunks if total_chunks else None)
+    grid_id: Optional[ObjectId] = None
+    doc_id: Optional[ObjectId] = None
+    chunk_ids: List[ObjectId] = []
 
-    if result:
-        for index, (chunk_id, chunk_doc) in enumerate(
-            zip(result.inserted_ids, chunk_docs, strict=False), start=1
-        ):
-            phrases = extract_keyphrases(chunk_doc["text"], max_k=8)
-            if phrases:
-                upsert_nodes_edges(kg_nodes, kg_edges, chunk_id, phrases)
-            notify("Updating knowledge graph", index, total_chunks)
+    try:
+        notify("Uploading document")
+        grid_id = fs.put(file_bytes, filename=filename, content_type=content_type)
+        document = {
+            "title": title,
+            "filename": filename,
+            "doc_type": doc_type,
+            "uploaded_by": uploaded_by,
+            "uploaded_at": datetime.now(tz=timezone.utc),
+            "gridfs_id": grid_id,
+        }
+        doc_id = documents.insert_one(document).inserted_id
+
+        if chunk_docs:
+            for chunk_doc in chunk_docs:
+                chunk_doc["doc_id"] = doc_id
+
+        notify("Saving chunks", 0, total_chunks if total_chunks else None)
+        result = doc_chunks.insert_many(chunk_docs) if chunk_docs else None
+        if result:
+            chunk_ids = list(result.inserted_ids)
+        notify("Saving chunks", total_chunks, total_chunks if total_chunks else None)
+
+        if chunk_ids:
+            for index, (chunk_id, chunk_doc) in enumerate(
+                zip(chunk_ids, chunk_docs, strict=False), start=1
+            ):
+                phrases = extract_keyphrases(chunk_doc["text"], max_k=8)
+                if phrases:
+                    upsert_nodes_edges(kg_nodes, kg_edges, chunk_id, phrases)
+                notify("Updating knowledge graph", index, total_chunks)
+
+    except Exception:
+        logger.exception("Ingestion failed; rolling back partial state for '%s'.", filename)
+        _cleanup_failed_ingest(
+            fs=fs,
+            documents=documents,
+            doc_chunks=doc_chunks,
+            kg_edges=kg_edges,
+            doc_id=doc_id,
+            gridfs_id=grid_id,
+            chunk_ids=chunk_ids,
+        )
+        raise
 
     notify("Completed ingestion")
     logger.info(
@@ -174,6 +197,39 @@ def ingest_file(
         chunk_count=len(chunk_docs),
         page_count=len(pages),
     )
+
+
+def _cleanup_failed_ingest(
+    *,
+    fs: GridFS,
+    documents: Collection,
+    doc_chunks: Collection,
+    kg_edges: Collection,
+    doc_id: Optional[ObjectId],
+    gridfs_id: Optional[ObjectId],
+    chunk_ids: List[ObjectId],
+) -> None:
+    """Best-effort rollback when persistence fails mid-ingestion."""
+
+    if chunk_ids:
+        logger.info("Removing %s chunk records after failure.", len(chunk_ids))
+        doc_chunks.delete_many({"_id": {"$in": chunk_ids}})
+        kg_edges.update_many(
+            {"chunk_ids": {"$in": chunk_ids}},
+            {"$pull": {"chunk_ids": {"$in": chunk_ids}}},
+        )
+        kg_edges.delete_many({"chunk_ids": {"$size": 0}})
+
+    if doc_id:
+        logger.info("Removing document metadata '%s' after failure.", doc_id)
+        documents.delete_one({"_id": doc_id})
+
+    if gridfs_id:
+        try:
+            logger.info("Deleting GridFS file '%s' after failure.", gridfs_id)
+            fs.delete(gridfs_id)
+        except Exception:  # noqa: BLE001 - best-effort cleanup
+            logger.warning("Failed to delete GridFS file '%s' during cleanup.", gridfs_id)
 
 
 def _detect_doc_type(filename: str, content_type: str) -> str:
