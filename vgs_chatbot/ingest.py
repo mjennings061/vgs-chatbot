@@ -3,17 +3,26 @@
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import os
 from typing import Callable, List, Optional, Tuple
 
 from bson import ObjectId
 from gridfs import GridFS
 from pymongo.collection import Collection
 
+from vgs_chatbot.config import get_settings
 from vgs_chatbot.embeddings import FastEmbedder
 from vgs_chatbot.kg import extract_keyphrases, upsert_nodes_edges
-from vgs_chatbot.utils_text import chunk_text, detect_sections, read_docx, read_pdf
+from vgs_chatbot.utils_text import (
+    chunk_text,
+    clean_title,
+    detect_sections,
+    read_docx,
+    read_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +34,29 @@ class IngestResult:
     document_id: ObjectId
     chunk_count: int
     page_count: int
+
+
+def _extract_phrases_job(args: Tuple[str, int]) -> List[str]:
+    """Worker helper for multiprocessing-safe phrase extraction."""
+    text, max_k = args
+    try:
+        return extract_keyphrases(text, max_k=max_k)
+    except Exception:  # noqa: BLE001 - worker safety
+        logger.exception("Keyphrase extraction failed in worker.")
+        return []
+
+
+def _process_page_job(args: Tuple[int, str, int, int]) -> List[Tuple[int, str, str]]:
+    """Worker helper to detect sections and chunk a page."""
+    page_no, text, target_chars, overlap = args
+    sections = detect_sections(text) or [("Page", text)]
+    chunks: List[Tuple[int, str, str]] = []
+    for section_title, body in sections:
+        section_key = section_title.strip() or f"Page {page_no}"
+        for chunk in chunk_text(body, target_chars=target_chars, overlap=overlap):
+            if chunk:
+                chunks.append((page_no, section_key, chunk))
+    return chunks
 
 
 def ingest_file(
@@ -83,7 +115,9 @@ def ingest_file(
             logger.debug("Ingestion stage '%s' updated.", stage)
 
     doc_type = _detect_doc_type(filename, content_type)
+    settings = get_settings()
     title = filename.rsplit(".", 1)[0]
+    title_key = clean_title(title).lower()
     logger.info(
         "Starting ingestion for '%s' detected as '%s' uploaded by '%s'.",
         filename,
@@ -94,17 +128,20 @@ def ingest_file(
     pages = _load_pages(doc_type, file_bytes)
     total_pages = len(pages)
     notify("Processing pages", 0, total_pages if total_pages else None)
+    worker_count = max(1, (os.cpu_count() or 2) - 1)
 
     chunk_inputs: List[Tuple[int, str, str]] = []
-    for page_index, (page_no, text) in enumerate(pages, start=1):
-        notify("Processing pages", page_index, total_pages if total_pages else None)
-        sections = detect_sections(text) or [("Page", text)]
-        for section_title, body in sections:
-            section_key = section_title.strip() or f"Page {page_no}"
-            for chunk in chunk_text(body):
-                if not chunk:
-                    continue
-                chunk_inputs.append((page_no, section_key, chunk))
+    page_jobs = [
+        (page_no, text, settings.chunk_target_chars, settings.chunk_overlap_chars)
+        for page_no, text in pages
+    ]
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        for page_index, chunks_for_page in enumerate(
+            executor.map(_process_page_job, page_jobs), start=1
+        ):
+            notify("Processing pages", page_index, total_pages if total_pages else None)
+            if chunks_for_page:
+                chunk_inputs.extend(chunks_for_page)
 
     total_chunks = len(chunk_inputs)
     notify("Chunking document", 0, total_chunks if total_chunks else None)
@@ -140,16 +177,43 @@ def ingest_file(
     chunk_ids: List[ObjectId] = []
 
     try:
+        existing = documents.find_one({"title_key": title_key})
+        if existing:
+            doc_id = existing["_id"]
+            chunk_ids = [
+                chunk["_id"]
+                for chunk in doc_chunks.find({"doc_id": doc_id}, {"_id": 1})
+            ]
+            if chunk_ids:
+                doc_chunks.delete_many({"_id": {"$in": chunk_ids}})
+                kg_edges.update_many(
+                    {"chunk_ids": {"$in": chunk_ids}},
+                    {"$pull": {"chunk_ids": {"$in": chunk_ids}}},
+                )
+                kg_edges.delete_many({"chunk_ids": {"$size": 0}})
+            if existing.get("gridfs_id"):
+                try:
+                    fs.delete(existing["gridfs_id"])
+                except Exception:  # noqa: BLE001 - best effort cleanup
+                    logger.warning(
+                        "Failed to delete previous GridFS file '%s'.",
+                        existing["gridfs_id"],
+                    )
+            documents.delete_one({"_id": doc_id})
+
         notify("Uploading document")
         grid_id = fs.put(file_bytes, filename=filename, content_type=content_type)
         document = {
             "title": title,
+            "title_key": title_key,
             "filename": filename,
             "doc_type": doc_type,
             "uploaded_by": uploaded_by,
             "uploaded_at": datetime.now(tz=timezone.utc),
             "gridfs_id": grid_id,
         }
+        if doc_id:
+            document["_id"] = doc_id
         doc_id = documents.insert_one(document).inserted_id
 
         if chunk_docs:
@@ -162,11 +226,17 @@ def ingest_file(
             chunk_ids = list(result.inserted_ids)
         notify("Saving chunks", total_chunks, total_chunks if total_chunks else None)
 
-        if chunk_ids:
-            for index, (chunk_id, chunk_doc) in enumerate(
-                zip(chunk_ids, chunk_docs, strict=False), start=1
+        phrase_results: List[List[str]] = []
+        if chunk_docs:
+            jobs = [(doc["text"], settings.kg_max_phrases) for doc in chunk_docs]
+            # Parallelise phrase extraction; DB writes remain serial to avoid contention.
+            with ProcessPoolExecutor(max_workers=worker_count) as executor:
+                phrase_results = list(executor.map(_extract_phrases_job, jobs))
+
+        if chunk_ids and phrase_results:
+            for index, (chunk_id, phrases) in enumerate(
+                zip(chunk_ids, phrase_results, strict=False), start=1
             ):
-                phrases = extract_keyphrases(chunk_doc["text"], max_k=8)
                 if phrases:
                     upsert_nodes_edges(kg_nodes, kg_edges, chunk_id, phrases)
                 notify("Updating knowledge graph", index, total_chunks)

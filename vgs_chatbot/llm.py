@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
 try:
     from openai import OpenAI
@@ -14,6 +14,58 @@ from vgs_chatbot.config import get_settings
 from vgs_chatbot.retrieve import RetrievedChunk
 
 logger = logging.getLogger(__name__)
+
+
+def rewrite_question(
+    question: str, history: Sequence[dict[str, str]] | None = None
+) -> str:
+    """Rewrite the question using brief chat history to steer retrieval.
+
+    Keeps wording aligned to Volunteer Gliding Squadron (VGS) docs and avoids
+    adding new facts; falls back to the original question when LLM access is unavailable.
+    """
+    settings = get_settings()
+    if not settings.openai_api_key or not OpenAI:
+        return question
+
+    snippets: List[str] = []
+    # Only include the last few turns to keep the rewrite prompt lean.
+    for turn in (history or [])[-4:]:
+        q = turn.get("question")
+        a = turn.get("answer")
+        if not q:
+            continue
+        snippet = f"Q: {q}"
+        if a:
+            snippet += f"\nA: {a}"
+        snippets.append(snippet)
+    history_block = "\n\n".join(snippets) if snippets else "None"
+
+    client = OpenAI(api_key=settings.openai_api_key)
+    prompt = """
+You are assisting retrieval for Royal Air Force Volunteer Gliding Squadron (VGS) documents.
+Rewrite the user's latest question to be specific, self-contained, and phrased like VGS policy/training material (Viking glider, winch launches, GIF/GS/FSC, CGS/CFS).
+Do not invent facts. Return a single rewritten question only.
+Recent chat (for context, may be empty):
+"""
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-nano",
+            temperature=0.2,
+            messages=[
+                {"role": "system", "content": prompt},
+                {
+                    "role": "user",
+                    "content": f"{history_block}\n\nUser question: {question}",
+                },
+            ],
+        )
+        rewritten = response.choices[0].message.content
+        if rewritten:
+            return rewritten.strip()
+    except Exception:  # noqa: BLE001 - best-effort rewrite
+        logger.exception("Question rewrite failed; using original.")
+    return question
 
 
 def generate_answer(query: str, chunks: List[RetrievedChunk]) -> str:

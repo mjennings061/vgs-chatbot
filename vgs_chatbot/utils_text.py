@@ -100,7 +100,10 @@ def detect_sections(text: str) -> List[Tuple[str, str]]:
 
 
 def chunk_text(text: str, target_chars: int = 900, overlap: int = 120) -> List[str]:
-    """Chunk text into roughly target-sized pieces with soft paragraph boundaries.
+    """Chunk text into roughly target-sized pieces with soft boundaries.
+
+    Long paragraphs are split sentence-first (when possible) to avoid mid-sentence
+    breaks, then fall back to overlapping character windows as needed.
 
     Args:
         text: Text to segment.
@@ -160,7 +163,7 @@ def _looks_like_heading(line: str) -> bool:
 
 
 def _split_long_paragraph(text: str, target_chars: int, overlap: int) -> List[str]:
-    """Split a long paragraph into overlapping character windows.
+    """Split a long paragraph with sentence-aware windows, then overlap fallback.
 
     Args:
         text: Paragraph text to segment.
@@ -175,6 +178,41 @@ def _split_long_paragraph(text: str, target_chars: int, overlap: int) -> List[st
         return []
     if len(cleaned) <= target_chars:
         return [cleaned]
+
+    sentences = _split_sentences(cleaned)
+    if len(sentences) > 1:
+        sentence_chunks: List[str] = []
+        current = ""
+        for sent in sentences:
+            candidate = f"{current} {sent}".strip() if current else sent
+            if len(candidate) <= target_chars:
+                current = candidate
+                continue
+
+            if current:
+                sentence_chunks.append(current)
+                if overlap > 0:
+                    # Carry a short tail forward to soften boundaries.
+                    tail = current.split()[-max(1, overlap // 8) :]
+                    current = f"{' '.join(tail)} {sent}".strip()
+                else:
+                    current = sent
+            else:
+                sentence_chunks.append(sent)
+                current = ""
+
+        if current:
+            sentence_chunks.append(current)
+
+        # Prefer sentence-based segments when they stay close to the target size.
+        if all(len(chunk) <= target_chars * 1.2 for chunk in sentence_chunks):
+            logger.debug(
+                "Split long paragraph into %s sentence-based segments.",
+                len(sentence_chunks),
+            )
+            return sentence_chunks
+
+    # Fallback: overlapping character windows for edge cases (tables, no punctuation).
     step = max(1, target_chars - overlap)
     segments: List[str] = []
     for start in range(0, len(cleaned), step):
@@ -189,6 +227,12 @@ def _split_long_paragraph(text: str, target_chars: int, overlap: int) -> List[st
         len(segments),
     )
     return segments
+
+
+def _split_sentences(text: str) -> List[str]:
+    """Lightweight sentence splitter to keep chunk breaks natural."""
+    parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
+    return [p.strip() for p in parts if p and p.strip()]
 
 
 def clean_title(title: str) -> str:
