@@ -262,6 +262,9 @@ def ingest_file(
         len(chunk_docs),
     )
 
+    if not doc_id:
+        raise RuntimeError("Ingestion completed without a valid document ID.")
+
     return IngestResult(
         document_id=doc_id,
         chunk_count=len(chunk_docs),

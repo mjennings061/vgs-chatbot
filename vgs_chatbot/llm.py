@@ -15,6 +15,8 @@ from vgs_chatbot.retrieve import RetrievedChunk
 
 logger = logging.getLogger(__name__)
 
+MODEL = "gpt-4.1-nano"
+
 
 def rewrite_question(
     question: str, history: Sequence[dict[str, str]] | None = None
@@ -31,26 +33,34 @@ def rewrite_question(
     snippets: List[str] = []
     # Only include the last few turns to keep the rewrite prompt lean.
     for turn in (history or [])[-4:]:
-        q = turn.get("question")
-        a = turn.get("answer")
-        if not q:
+        past_question = turn.get("question")
+        past_answer = turn.get("answer")
+        if not past_question:
             continue
-        snippet = f"Q: {q}"
-        if a:
-            snippet += f"\nA: {a}"
+        snippet = f"Q: {past_question}"
+        if past_answer:
+            snippet += f"\nA: {past_answer}"
         snippets.append(snippet)
     history_block = "\n\n".join(snippets) if snippets else "None"
 
     client = OpenAI(api_key=settings.openai_api_key)
     prompt = """
+## Instructions
+
 You are assisting retrieval for Royal Air Force Volunteer Gliding Squadron (VGS) documents.
-Rewrite the user's latest question to be specific, self-contained, and phrased like VGS policy/training material (Viking glider, winch launches, GIF/GS/FSC, CGS/CFS).
-Do not invent facts. Return a single rewritten question only.
+- Rewrite the user's latest question to be specific, self-contained, and phrased like VGS policy/training material (Viking glider, winch launches, GIF/GS/FSC, CGS/CFS).
+- Acronyms should be preserved in your rewrite.
+- Use the provided conversation history to inform the rewrite.
+- Do not invent facts. Return a single rewritten question only.
+
+## Conversation History
+
 Recent chat (for context, may be empty):
+
 """
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model=MODEL,
             temperature=0.2,
             messages=[
                 {"role": "system", "content": prompt},
@@ -62,6 +72,7 @@ Recent chat (for context, may be empty):
         )
         rewritten = response.choices[0].message.content
         if rewritten:
+            logger.debug("Rewrote question '%s' to '%s'.", question, rewritten)
             return rewritten.strip()
     except Exception:  # noqa: BLE001 - best-effort rewrite
         logger.exception("Question rewrite failed; using original.")
@@ -104,14 +115,16 @@ You are to answer questions using the context provided from RAG searches.
 - A VGS primarily launch gliders using a winch with cables, rarely are aerotows used.
 - Qualified Gliding Instructors (QGIs) are categories B2, B1, A2, A1 (including star e.g. A2*)
 - Graded pilots are G2 and G1. Ungraded pilots are anyone else
-
+- Orders are ranked in importance, with RA being highest and least restrictive, GASOs being more restrictive and DHOs being the most restrictive.
 
 **IMPORTANT**
 - Answer using only the provided context.
+- Cite the document sections you used to form your answer.
+- Present all relevant information in your answer as clearly as possible, as some information may be critical for safety.
 - If the answer or relevant context are not present, say you do not know.
         """
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model=MODEL,
             temperature=0.1,
             messages=[
                 {"role": "system", "content": prompt},

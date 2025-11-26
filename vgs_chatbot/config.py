@@ -91,7 +91,7 @@ class Settings:
     @property
     def chunk_target_chars(self) -> int:
         # Target chunk size (characters) when splitting documents; keep close to ingestion defaults.
-        return 900
+        return 3000
 
     @property
     def chunk_overlap_chars(self) -> int:
