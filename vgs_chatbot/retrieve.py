@@ -79,7 +79,10 @@ class RetrievedChunk:
     page_start: int
     page_end: int
     text: str
-    score: float
+    chunk_type: str = "text"
+    order_code: Optional[str] = None
+    section_path: list[str] = field(default_factory=list)
+    score: float = 0.0
     source_scores: dict[str, float] = field(default_factory=dict)
 
     def as_citation(self) -> dict[str, str | int]:
@@ -187,7 +190,8 @@ def retrieve_chunks(
         kw_hits=kw_hits,
         kg_bonus_ids=candidate_ids,
     )
-    limited = fused[: settings.retrieval_top_k]
+    boosted = _boost_by_metadata(fused, query)
+    limited = boosted[: settings.retrieval_top_k]
     logger.info(
         "Retrieve returned %s chunks (vector=%s, text=%s, query='%s').",
         len(limited),
@@ -239,6 +243,9 @@ def _vector_search(
                 "doc_title": 1,
                 "section_title": 1,
                 "section_id": 1,
+                "section_path": 1,
+                "order_code": 1,
+                "chunk_type": 1,
                 "page_start": 1,
                 "page_end": 1,
                 "text": 1,
@@ -311,13 +318,16 @@ def _text_search(
                     "_id": 1,
                     "doc_id": 1,
                     "doc_title": 1,
-                    "section_title": 1,
-                    "section_id": 1,
-                    "page_start": 1,
-                    "page_end": 1,
-                    "text": 1,
-                    "score": {"$meta": "searchScore"},
-                }
+                "section_title": 1,
+                "section_id": 1,
+                "section_path": 1,
+                "order_code": 1,
+                "chunk_type": 1,
+                "page_start": 1,
+                "page_end": 1,
+                "text": 1,
+                "score": {"$meta": "searchScore"},
+            }
             },
         ]
     )
@@ -348,6 +358,9 @@ def _keyword_hits(
             "doc_title": 1,
             "section_title": 1,
             "section_id": 1,
+            "section_path": 1,
+            "order_code": 1,
+            "chunk_type": 1,
             "page_start": 1,
             "page_end": 1,
             "text": 1,
@@ -447,9 +460,48 @@ def _make_chunk(item: dict[str, Any]) -> RetrievedChunk:
         section_title=clean_title(item.get("section_title", "")),
         page_start=item.get("page_start", 0),
         page_end=item.get("page_end", 0),
+        chunk_type=item.get("chunk_type", "text") or "text",
+        order_code=item.get("order_code"),
+        section_path=item.get("section_path", []) or [],
         text=item.get("text", ""),
         score=0.0,
     )
+
+
+def _boost_by_metadata(chunks: list[RetrievedChunk], query: str) -> list[RetrievedChunk]:
+    """Apply light metadata-aware boosts (order code, paragraph vs table)."""
+    order_codes = _extract_order_codes(query)
+    prefers_table = _prefers_table_results(query)
+
+    for chunk in chunks:
+        bonus = 0.0
+        chunk_code = (chunk.order_code or "").replace(" ", "").lower()
+        if order_codes and chunk_code:
+            if any(code in chunk_code for code in order_codes):
+                bonus += 0.2
+        if chunk.chunk_type == "text" and not prefers_table:
+            bonus += 0.05
+        if chunk.chunk_type == "table" and prefers_table:
+            bonus += 0.05
+        if bonus:
+            chunk.score += bonus
+            chunk.source_scores["metadata"] = chunk.source_scores.get("metadata", 0.0) + bonus
+
+    return sorted(chunks, key=lambda c: c.score, reverse=True)
+
+
+def _extract_order_codes(text: str) -> Set[str]:
+    """Extract normalised order codes from a query (e.g., DHO 2103)."""
+    matches = re.findall(r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, flags=re.IGNORECASE)
+    codes: Set[str] = set()
+    for prefix, digits in matches:
+        codes.add(f"{prefix.lower()}{digits}")
+    return codes
+
+
+def _prefers_table_results(query: str) -> bool:
+    """Heuristic: return True when the query likely wants structured/table data."""
+    return bool(re.search(r"\b(table|list|matrix|summary|limits?)\b", query, flags=re.IGNORECASE))
 
 
 def _expand_query_for_text(query: str) -> list[str]:

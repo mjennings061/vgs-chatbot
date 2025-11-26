@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import os
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Sequence, Tuple
 
 from bson import ObjectId
 from gridfs import GridFS
@@ -20,6 +20,7 @@ from vgs_chatbot.utils_text import (
     chunk_text,
     clean_title,
     detect_sections,
+    Section,
     read_docx,
     read_pdf,
 )
@@ -44,19 +45,6 @@ def _extract_phrases_job(args: Tuple[str, int]) -> List[str]:
     except Exception:  # noqa: BLE001 - worker safety
         logger.exception("Keyphrase extraction failed in worker.")
         return []
-
-
-def _process_page_job(args: Tuple[int, str, int, int]) -> List[Tuple[int, str, str]]:
-    """Worker helper to detect sections and chunk a page."""
-    page_no, text, target_chars, overlap = args
-    sections = detect_sections(text) or [("Page", text)]
-    chunks: List[Tuple[int, str, str]] = []
-    for section_title, body in sections:
-        section_key = section_title.strip() or f"Page {page_no}"
-        for chunk in chunk_text(body, target_chars=target_chars, overlap=overlap):
-            if chunk:
-                chunks.append((page_no, section_key, chunk))
-    return chunks
 
 
 def ingest_file(
@@ -97,16 +85,7 @@ def ingest_file(
     def notify(
         stage: str, current: Optional[int] = None, total: Optional[int] = None
     ) -> None:
-        """Forward progress updates to optional callback and log transitions.
-
-        Args:
-            stage: Name of the ingestion stage being reported.
-            current: Current progress step for the stage.
-            total: Total steps expected for the stage.
-
-        Returns:
-            None: Performs logging and optional callback invocation.
-        """
+        """Forward progress updates to optional callback and log transitions."""
         if progress_callback:
             progress_callback(stage, current, total)
         if total is not None and current is not None:
@@ -127,38 +106,75 @@ def ingest_file(
     notify("Loading pages")
     pages = _load_pages(doc_type, file_bytes)
     total_pages = len(pages)
-    notify("Processing pages", 0, total_pages if total_pages else None)
-    worker_count = max(1, (os.cpu_count() or 2) - 1)
 
-    chunk_inputs: List[Tuple[int, str, str]] = []
-    page_jobs = [
-        (page_no, text, settings.chunk_target_chars, settings.chunk_overlap_chars)
-        for page_no, text in pages
-    ]
-    with ProcessPoolExecutor(max_workers=worker_count) as executor:
-        for page_index, chunks_for_page in enumerate(
-            executor.map(_process_page_job, page_jobs), start=1
+    combined_text = _combine_pages_with_markers(pages)
+    sections = detect_sections(combined_text)
+    notify("Processing pages", total_pages, total_pages if total_pages else None)
+
+    chunk_inputs: List[Tuple[str, Optional[str], str, str, int, int]] = []
+    for section in sections or []:
+        section_key = section.title.strip() or "General"
+        section_page_start, section_page_end = _section_page_range(section)
+        for fragment in chunk_text(
+            blocks=section.blocks,
+            target_chars=settings.chunk_target_chars,
+            overlap=settings.chunk_overlap_chars,
         ):
-            notify("Processing pages", page_index, total_pages if total_pages else None)
-            if chunks_for_page:
-                chunk_inputs.extend(chunks_for_page)
+            if not fragment.text:
+                continue
+            page_start = fragment.page_start
+            page_end = fragment.page_end
+            if page_start is None and section_page_start is not None:
+                page_start = section_page_start
+            if page_end is None and section_page_end is not None:
+                page_end = section_page_end
+            if page_start is None and page_end is not None:
+                page_start = page_end
+            if page_end is None and page_start is not None:
+                page_end = page_start
+            if page_start is None and page_end is None:
+                page_start = page_end = 0
+
+            if page_start is None:
+                page_start = 0
+            if page_end is None:
+                page_end = 0
+
+            chunk_inputs.append(
+                (
+                    section_key,
+                    section.order_code,
+                    fragment.kind,
+                    fragment.text,
+                    page_start,
+                    page_end,
+                )
+            )
 
     total_chunks = len(chunk_inputs)
     notify("Chunking document", 0, total_chunks if total_chunks else None)
 
     chunk_docs: List[dict] = []
     section_ids: dict[str, ObjectId] = {}
-    for chunk_index, (page_no, section_key, chunk_text_value) in enumerate(
-        chunk_inputs, start=1
-    ):
+    for chunk_index, (
+        section_key,
+        order_code,
+        chunk_kind,
+        chunk_text_value,
+        page_start,
+        page_end,
+    ) in enumerate(chunk_inputs, start=1):
         section_id = section_ids.setdefault(section_key, ObjectId())
         chunk_docs.append(
             {
                 "doc_title": title,
                 "section_id": section_id,
                 "section_title": section_key,
-                "page_start": page_no,
-                "page_end": page_no,
+                "section_path": [section_key],
+                "order_code": order_code,
+                "chunk_type": chunk_kind,
+                "page_start": page_start,
+                "page_end": page_end,
                 "text": chunk_text_value,
             }
         )
@@ -175,6 +191,8 @@ def ingest_file(
     grid_id: Optional[ObjectId] = None
     doc_id: Optional[ObjectId] = None
     chunk_ids: List[ObjectId] = []
+
+    worker_count = max(1, (os.cpu_count() or 2) - 1)
 
     try:
         existing = documents.find_one({"title_key": title_key})
@@ -306,15 +324,7 @@ def _cleanup_failed_ingest(
 
 
 def _detect_doc_type(filename: str, content_type: str) -> str:
-    """Infer document type from filename or MIME type.
-
-    Args:
-        filename: Name of the uploaded file.
-        content_type: MIME type reported by the uploader.
-
-    Returns:
-        str: Normalised document type indicator.
-    """
+    """Infer document type from filename or MIME type."""
     lowered = filename.lower()
     if lowered.endswith(".pdf") or content_type == "application/pdf":
         return "pdf"
@@ -324,15 +334,7 @@ def _detect_doc_type(filename: str, content_type: str) -> str:
 
 
 def _load_pages(doc_type: str, file_bytes: bytes) -> List[Tuple[int, str]]:
-    """Load pages based on document type.
-
-    Args:
-        doc_type: Normalised document type (pdf, docx, unknown).
-        file_bytes: Raw file contents.
-
-    Returns:
-        list[tuple[int, str]]: Sequence of page numbers and extracted text.
-    """
+    """Load pages based on document type."""
     if doc_type == "pdf":
         return read_pdf(file_bytes)
     if doc_type == "docx":
@@ -340,3 +342,25 @@ def _load_pages(doc_type: str, file_bytes: bytes) -> List[Tuple[int, str]]:
     # Unknown fallback: treat as plain text
     text = file_bytes.decode("utf-8", errors="ignore")
     return [(1, text)]
+
+
+def _combine_pages_with_markers(pages: Sequence[Tuple[int, str]]) -> str:
+    """Join page texts with explicit markers to preserve continuity."""
+    parts: List[str] = []
+    for page_no, text in pages:
+        parts.append(f"[[[PAGE_BREAK_{page_no}]]]")
+        parts.append(text.strip())
+    return "\n".join(parts)
+
+
+def _section_page_range(section: Section) -> tuple[int | None, int | None]:
+    """Return min/max page range covered by a section."""
+    pages: List[int] = []
+    for block in section.blocks:
+        if block.page_start is not None:
+            pages.append(block.page_start)
+        if block.page_end is not None:
+            pages.append(block.page_end)
+    if not pages:
+        return (None, None)
+    return (min(pages), max(pages))
