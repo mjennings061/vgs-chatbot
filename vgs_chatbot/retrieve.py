@@ -79,7 +79,10 @@ class RetrievedChunk:
     page_start: int
     page_end: int
     text: str
-    score: float
+    chunk_type: str = "text"
+    order_code: Optional[str] = None
+    section_path: list[str] = field(default_factory=list)
+    score: float = 0.0
     source_scores: dict[str, float] = field(default_factory=dict)
 
     def as_citation(self) -> dict[str, str | int]:
@@ -133,6 +136,10 @@ def retrieve_chunks(
         max_candidates=settings.graph_max_candidates,
     )
     logger.debug("Candidate set contains %s chunk ids.", len(candidate_ids))
+    kg_filter_expr: Mapping[str, Any] | None = None
+    if settings.retrieval_require_kg_filter and candidate_ids:
+        # Optional hard filter for small corpora: restrict retrieval stages to KG candidates.
+        kg_filter_expr = {"_id": {"$in": list(candidate_ids)}}
 
     # 2) Semantic retrieval – steer the embedding slightly toward common domain
     #    phrasing before calling Vector Search.
@@ -144,8 +151,7 @@ def retrieve_chunks(
         query_vector=query_vector,
         limit=settings.retrieval_top_k,
         num_candidates=settings.retrieval_num_candidates,
-        # Do not filter vector search to KG candidates; use KG only for scoring bonus
-        filter_expr=None,
+        filter_expr=kg_filter_expr,
     )
     # 3) Textual retrieval – expand the query with simple domain synonyms and a
     #    condensed keyword version; then Atlas Search (BM25).
@@ -154,6 +160,7 @@ def retrieve_chunks(
         collection=doc_chunks,
         query=expanded_terms,
         limit=settings.retrieval_top_k,
+        filter_expr=kg_filter_expr,
     )
     # 3b) Lexical fallback – on very short queries Atlas Search can miss.
     #     Fall back to a strict AND regex over the chunk text to recover
@@ -163,6 +170,7 @@ def retrieve_chunks(
             collection=doc_chunks,
             query=query,
             limit=settings.retrieval_top_k,
+            filter_expr=kg_filter_expr,
         )
     # 4) Heuristic keyword pass – only for day-based limits to avoid unrelated
     #    noise. This helps questions like "how many flights in one day?".
@@ -171,6 +179,7 @@ def retrieve_chunks(
         kw_hits = _keyword_hits(
             collection=doc_chunks,
             limit=max(12, settings.retrieval_top_k),
+            filter_expr=kg_filter_expr,
         )
 
     # 5) Score fusion – combine signals with simple weights and a small graph
@@ -181,7 +190,8 @@ def retrieve_chunks(
         kw_hits=kw_hits,
         kg_bonus_ids=candidate_ids,
     )
-    limited = fused[: settings.retrieval_top_k]
+    boosted = _boost_by_metadata(fused, query)
+    limited = boosted[: settings.retrieval_top_k]
     logger.info(
         "Retrieve returned %s chunks (vector=%s, text=%s, query='%s').",
         len(limited),
@@ -233,6 +243,9 @@ def _vector_search(
                 "doc_title": 1,
                 "section_title": 1,
                 "section_id": 1,
+                "section_path": 1,
+                "order_code": 1,
+                "chunk_type": 1,
                 "page_start": 1,
                 "page_end": 1,
                 "text": 1,
@@ -255,6 +268,7 @@ def _text_search(
     collection: Collection,
     query: str | Sequence[str],
     limit: int,
+    filter_expr: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Execute Atlas full-text search and return raw hits.
 
@@ -262,6 +276,7 @@ def _text_search(
         collection: MongoDB collection containing chunk documents.
         query: User query string used for text search.
         limit: Maximum number of results to return.
+        filter_expr: Optional filter applied post-search (e.g., KG candidates).
 
     Returns:
         list[dict]: Aggregation results with text scores.
@@ -292,27 +307,38 @@ def _text_search(
                 },
             }
         },
-        {"$limit": limit},
-        {
-            "$project": {
-                "_id": 1,
-                "doc_id": 1,
-                "doc_title": 1,
+    ]
+    if filter_expr:
+        pipeline.append({"$match": filter_expr})
+    pipeline.extend(
+        [
+            {"$limit": limit},
+            {
+                "$project": {
+                    "_id": 1,
+                    "doc_id": 1,
+                    "doc_title": 1,
                 "section_title": 1,
                 "section_id": 1,
+                "section_path": 1,
+                "order_code": 1,
+                "chunk_type": 1,
                 "page_start": 1,
                 "page_end": 1,
                 "text": 1,
                 "score": {"$meta": "searchScore"},
             }
-        },
-    ]
+            },
+        ]
+    )
     results: list[dict[str, Any]] = list(collection.aggregate(pipeline))
     logger.debug("Text search returned %s hits (limit=%s).", len(results), limit)
     return results
 
 
-def _keyword_hits(*, collection: Collection, limit: int) -> list[dict[str, Any]]:
+def _keyword_hits(
+    *, collection: Collection, limit: int, filter_expr: Mapping[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Heuristic keyword matches for day-based launch/flight limits.
 
     Targets patterns like "one day"/"per day" co-occurring with "launch"/"flight".
@@ -321,13 +347,20 @@ def _keyword_hits(*, collection: Collection, limit: int) -> list[dict[str, Any]]
     # Two-stage AND: both day-phrase and launch/flight must appear in text.
     day_regex = {"$regex": r"(one day|1 day|per day)", "$options": "i"}
     lf_regex = {"$regex": r"(launch|flight)s?", "$options": "i"}
+    base_filter: Mapping[str, Any] = {"$and": [{"text": day_regex}, {"text": lf_regex}]}
+    if filter_expr:
+        # Keep heuristic hits inside the optional KG filter boundary.
+        base_filter = {"$and": [base_filter, filter_expr]}
     cursor = collection.find(
-        {"$and": [{"text": day_regex}, {"text": lf_regex}]},
+        base_filter,
         {
             "doc_id": 1,
             "doc_title": 1,
             "section_title": 1,
             "section_id": 1,
+            "section_path": 1,
+            "order_code": 1,
+            "chunk_type": 1,
             "page_start": 1,
             "page_end": 1,
             "text": 1,
@@ -427,9 +460,48 @@ def _make_chunk(item: dict[str, Any]) -> RetrievedChunk:
         section_title=clean_title(item.get("section_title", "")),
         page_start=item.get("page_start", 0),
         page_end=item.get("page_end", 0),
+        chunk_type=item.get("chunk_type", "text") or "text",
+        order_code=item.get("order_code"),
+        section_path=item.get("section_path", []) or [],
         text=item.get("text", ""),
         score=0.0,
     )
+
+
+def _boost_by_metadata(chunks: list[RetrievedChunk], query: str) -> list[RetrievedChunk]:
+    """Apply light metadata-aware boosts (order code, paragraph vs table)."""
+    order_codes = _extract_order_codes(query)
+    prefers_table = _prefers_table_results(query)
+
+    for chunk in chunks:
+        bonus = 0.0
+        chunk_code = (chunk.order_code or "").replace(" ", "").lower()
+        if order_codes and chunk_code:
+            if any(code in chunk_code for code in order_codes):
+                bonus += 0.2
+        if chunk.chunk_type == "text" and not prefers_table:
+            bonus += 0.05
+        if chunk.chunk_type == "table" and prefers_table:
+            bonus += 0.05
+        if bonus:
+            chunk.score += bonus
+            chunk.source_scores["metadata"] = chunk.source_scores.get("metadata", 0.0) + bonus
+
+    return sorted(chunks, key=lambda c: c.score, reverse=True)
+
+
+def _extract_order_codes(text: str) -> Set[str]:
+    """Extract normalised order codes from a query (e.g., DHO 2103)."""
+    matches = re.findall(r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, flags=re.IGNORECASE)
+    codes: Set[str] = set()
+    for prefix, digits in matches:
+        codes.add(f"{prefix.lower()}{digits}")
+    return codes
+
+
+def _prefers_table_results(query: str) -> bool:
+    """Heuristic: return True when the query likely wants structured/table data."""
+    return bool(re.search(r"\b(table|list|matrix|summary|limits?)\b", query, flags=re.IGNORECASE))
 
 
 def _expand_query_for_text(query: str) -> list[str]:
@@ -551,6 +623,7 @@ def _lexical_search_fallback(
     collection: Collection,
     query: str,
     limit: int,
+    filter_expr: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Apply a simple regex AND search when Atlas Search yields no results.
 
@@ -586,6 +659,9 @@ def _lexical_search_fallback(
             mongo_filter: Mapping[str, Any] = regex_filters[0]
         else:
             mongo_filter = {"$and": regex_filters}
+        if filter_expr:
+            # Respect optional KG gating so regex fallback stays within the candidate set.
+            mongo_filter = {"$and": [mongo_filter, filter_expr]}
         cursor = collection.find(mongo_filter, projection).limit(limit)
         docs = list(cursor)
         if not docs:

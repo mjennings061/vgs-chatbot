@@ -33,6 +33,20 @@ def _to_python_floats(vector: Iterable[float]) -> List[float]:
     return [float(value) for value in vector]
 
 
+def _ensure_tqdm_lock_initialized() -> None:
+    """Work around tqdm>=4.67 removing the default `_lock` attribute."""
+
+    try:
+        import tqdm  # noqa: WPS433  # runtime import to avoid hard dependency at module load
+
+        tqdm_obj = getattr(tqdm, "tqdm", None)
+        if tqdm_obj is not None and hasattr(tqdm_obj, "get_lock"):
+            # `get_lock()` lazily initialises the internal lock if missing.
+            tqdm_obj.get_lock()
+    except Exception:  # pragma: no cover - defensive in case tqdm is absent
+        logger.debug("Unable to prime tqdm lock; continuing without workaround.", exc_info=True)
+
+
 class FastEmbedder:
     """Thin wrapper around FastEmbed with simple query caching."""
 
@@ -49,6 +63,7 @@ class FastEmbedder:
         self.model_name = model_name
         self.batch_size = batch_size
         self.cache_size = cache_size
+        _ensure_tqdm_lock_initialized()
         self._model = TextEmbedding(model_name=model_name)
         self._query_cache: OrderedDict[str, List[float]] = OrderedDict()
         logger.info("Loaded FastEmbed model '%s'.", model_name)

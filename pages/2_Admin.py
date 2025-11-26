@@ -162,73 +162,78 @@ def main() -> None:
         st.write(f"MongoDB host: `{settings.mongodb_host}`")
 
     st.subheader("Upload")
-    uploaded = st.file_uploader("Select a PDF or Word document", type=["pdf", "docx"])
+    uploaded_files = st.file_uploader(
+        "Select one or more PDF or Word documents",
+        type=["pdf", "docx"],
+        accept_multiple_files=True,
+    )
     uploader = st.session_state.get("username") or "admin"
 
-    if st.button("Ingest document", disabled=uploaded is None):
-        if not uploaded:
-            st.warning("Please choose a file to upload.")
+    if st.button("Ingest documents", disabled=not uploaded_files):
+        if not uploaded_files:
+            st.warning("Please choose at least one file to upload.")
         else:
-            with st.spinner("Processing document…"):
+            with st.spinner("Processing documents…"):
                 status_placeholder = st.empty()
                 progress_bar = st.progress(0)
-                last_stage: Dict[str, str | None] = {"name": None}
+                all_success = True
 
-                def report(
-                    stage: str, current: int | None = None, total: int | None = None
-                ) -> None:
-                    """Update Streamlit progress widgets and log stage changes.
+                for uploaded in uploaded_files:
+                    progress_bar.progress(0)
+                    last_stage: Dict[str, str | None] = {"name": None}
 
-                    Args:
-                        stage: Name of the ingestion stage being reported.
-                        current: Current progress within the stage.
-                        total: Total units of work for the stage if known.
+                    def report(
+                        stage: str, current: int | None = None, total: int | None = None
+                    ) -> None:
+                        label = f"{uploaded.name}: {stage}"
+                        if stage != last_stage["name"]:
+                            logger.debug("Ingestion stage -> %s (%s)", stage, uploaded.name)
+                            if total and total > 0:
+                                progress_bar.progress(0)
+                            last_stage["name"] = stage
+                        if total and current is not None and total > 0:
+                            percent = min(max(int(current * 100 / total), 0), 100)
+                            progress_bar.progress(percent)
+                            status_placeholder.markdown(
+                                f"**{label}**: {current} of {total}"
+                            )
+                        else:
+                            status_placeholder.markdown(f"**{label}**")
 
-                    Returns:
-                        None: Updates UI widgets and logs without producing a value.
-                    """
-                    if stage != last_stage["name"]:
-                        logger.debug("Ingestion stage -> %s", stage)
-                        if total and total > 0:
-                            progress_bar.progress(0)
-                        last_stage["name"] = stage
-                    if total and current is not None and total > 0:
-                        percent = min(max(int(current * 100 / total), 0), 100)
-                        progress_bar.progress(percent)
-                        status_placeholder.markdown(
-                            f"**{stage}**: {current} of {total}"
+                    try:
+                        result = ingest_file(
+                            fs=fs,
+                            documents=collections["documents"],
+                            doc_chunks=collections["doc_chunks"],
+                            kg_nodes=collections["kg_nodes"],
+                            kg_edges=collections["kg_edges"],
+                            embedder=embedder,
+                            file_bytes=uploaded.getvalue(),
+                            filename=uploaded.name,
+                            content_type=uploaded.type or "",
+                            uploaded_by=uploader,
+                            progress_callback=report,
                         )
+                    except Exception as exc:  # noqa: BLE001 - surface ingestion error
+                        logger.exception("Ingestion failed for '%s'.", uploaded.name)
+                        st.error(
+                            f"Ingestion failed for {uploaded.name}. Please review the logs and try again."
+                        )
+                        st.caption(f"Reason: {exc}")
+                        all_success = False
+                        break
                     else:
-                        status_placeholder.markdown(f"**{stage}**")
+                        logger.info(
+                            "Ingestion completed for '%s': chunks=%s, pages=%s",
+                            uploaded.name,
+                            result.chunk_count,
+                            result.page_count,
+                        )
+                        st.success(
+                            f"{uploaded.name}: {result.chunk_count} chunks across {result.page_count} pages."
+                        )
 
-                try:
-                    result = ingest_file(
-                        fs=fs,
-                        documents=collections["documents"],
-                        doc_chunks=collections["doc_chunks"],
-                        kg_nodes=collections["kg_nodes"],
-                        kg_edges=collections["kg_edges"],
-                        embedder=embedder,
-                        file_bytes=uploaded.getvalue(),
-                        filename=uploaded.name,
-                        content_type=uploaded.type or "",
-                        uploaded_by=uploader,
-                        progress_callback=report,
-                    )
-                except Exception as exc:  # noqa: BLE001 - surface ingestion error
-                    logger.exception("Ingestion failed for '%s'.", uploaded.name)
-                    st.error("Ingestion failed. Please review the logs and try again.")
-                    st.caption(f"Reason: {exc}")
-                else:
-                    logger.info(
-                        "Ingestion completed for '%s': chunks=%s, pages=%s",
-                        uploaded.name,
-                        result.chunk_count,
-                        result.page_count,
-                    )
-                    st.success(
-                        f"Ingested {result.chunk_count} chunks across {result.page_count} pages."
-                    )
+                if all_success:
                     st.rerun()
 
     st.subheader("Library")

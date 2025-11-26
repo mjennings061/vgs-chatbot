@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+import re
 from itertools import combinations
-from typing import Iterable, List, Set
+from typing import Iterable, List, Optional, Set
 
 import yake
 from bson import ObjectId
@@ -14,17 +15,68 @@ from pymongo.collection import Collection
 
 logger = logging.getLogger(__name__)
 
+_KG_STOPWORDS: Set[str] = {
+    # Generic structure words/headings
+    "section",
+    "chapter",
+    "page",
+    "pages",
+    "figure",
+    "fig",
+    "table",
+    "appendix",
+    "contents",
+    "overview",
+    "summary",
+    # Common boilerplate/empty markers
+    "blank",
+    "blank page",
+    "intentionally blank",
+    "blank for pagination",
+    "number description",
+    "not used",
+    "reserved",
+    # Month abbreviations often mis-read as headings
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "may",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "oct",
+    "nov",
+    "dec",
+}
 
-def extract_keyphrases(text: str, max_k: int = 8) -> List[str]:
+_KG_BAD_PATTERNS = [
+    r"\bpage\s+\d+(\s+of\s+\d+)?\b",
+    r"\bsection\s+\d+(\.\d+)*\b",
+    r"\bappendix\s+[a-z0-9]+\b",
+    r"\btable\s+\d+(\.\d+)*\b",
+    r"\bfigure\s+\d+(\.\d+)*\b",
+    r"\bintentionally\s+blank\b",
+    r"\bblank\s+for\s+pagination\b",
+    r"\bnumber\s+description\b",
+]
+
+def extract_keyphrases(
+    text: str, max_k: int = 8, stopwords: Optional[Set[str]] = None
+) -> List[str]:
     """Extract salient keyphrases from free text.
 
     Args:
         text: Raw text from which phrases will be extracted.
         max_k: Maximum number of phrases to return.
+        stopwords: Optional set of phrases to ignore.
 
     Returns:
         list[str]: Keyphrases sorted by importance.
     """
+    stops = stopwords or _KG_STOPWORDS
     cleaned = " ".join(text.split())
     if not cleaned:
         return []
@@ -32,13 +84,24 @@ def extract_keyphrases(text: str, max_k: int = 8) -> List[str]:
         lan="en", top=max(10, max_k * 2), n=3, dedupLim=0.9
     )
     phrases: List[str] = []
-    for phrase, _score in extractor.extract_keywords(cleaned):
+    seen_labels: Set[str] = set()
+    for phrase, _ in extractor.extract_keywords(cleaned):
         normalised = phrase.strip()
         if not normalised:
             continue
-        lower = _normalise_phrase(normalised)
-        if lower in {_normalise_phrase(p) for p in phrases}:
+        label = _normalise_phrase(normalised)
+        if (
+            not label
+            or len(label) < 3
+            or label in seen_labels
+            or label in stops
+            or label.replace(" ", "").isdigit()
+            or sum(ch.isalpha() for ch in label) < 3
+        ):
             continue
+        if any(re.search(pattern, label) for pattern in _KG_BAD_PATTERNS):
+            continue
+        seen_labels.add(label)
         phrases.append(normalised)
         if len(phrases) >= max_k:
             break
@@ -81,7 +144,7 @@ def upsert_nodes_edges(
             {"from_id": node["_id"], "to_id": node["_id"], "rel": "mentions"},
             {
                 "$addToSet": {"chunk_ids": chunk_id},
-                "$setOnInsert": {"weight": 1},
+                "$inc": {"weight": 1},
             },
             upsert=True,
         )

@@ -84,6 +84,26 @@ class Settings:
         return 400
 
     @property
+    def retrieval_require_kg_filter(self) -> bool:
+        # When True, retrieval stages are hard-filtered to KG candidates; useful for small, curated corpora.
+        return False
+
+    @property
+    def chunk_target_chars(self) -> int:
+        # Target chunk size (characters) when splitting documents; keep close to ingestion defaults.
+        return 3000
+
+    @property
+    def chunk_overlap_chars(self) -> int:
+        # Overlap when splitting long paragraphs; improves continuity across chunks.
+        return 120
+
+    @property
+    def kg_max_phrases(self) -> int:
+        # Cap the number of keyphrases per chunk to avoid KG bloat.
+        return 12
+
+    @property
     def graph_max_hops(self) -> int:
         return 1
 

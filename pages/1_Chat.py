@@ -8,7 +8,7 @@ import streamlit as st
 
 from vgs_chatbot.db import get_collections
 from vgs_chatbot.embeddings import get_embedder
-from vgs_chatbot.llm import generate_answer
+from vgs_chatbot.llm import generate_answer, rewrite_question
 from vgs_chatbot.retrieve import retrieve_chunks
 
 logger = logging.getLogger(__name__)
@@ -61,13 +61,16 @@ def main() -> None:
     if question and question.strip():
         clean_question = question.strip()
         logger.info("Received chat question: '%s'", clean_question)
+        rewritten = rewrite_question(clean_question, st.session_state["chat_history"])
+        if rewritten != clean_question:
+            logger.debug("Rewrote question for retrieval: '%s'", rewritten)
         with st.spinner("Retrieving context…"):
             chunks = retrieve_chunks(
                 doc_chunks=collections["doc_chunks"],
                 kg_nodes=collections["kg_nodes"],
                 kg_edges=collections["kg_edges"],
                 embedder=embedder,
-                query=clean_question,
+                query=rewritten,
             )
             logger.debug(
                 "Retrieved %s chunks for question.",
