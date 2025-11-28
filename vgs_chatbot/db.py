@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -14,9 +13,8 @@ from pymongo.database import Database
 from pymongo.errors import PyMongoError
 from bson import ObjectId
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
-
-logger = logging.getLogger(__name__)
 
 
 def connect_default() -> MongoClient:

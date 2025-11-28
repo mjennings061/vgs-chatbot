@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-import logging
-
 import streamlit as st
 
+from vgs_chatbot import logger
 from vgs_chatbot.db import get_collections
 from vgs_chatbot.embeddings import get_embedder
 from vgs_chatbot.llm import generate_answer, rewrite_question
 from vgs_chatbot.retrieve import retrieve_chunks
-
-logger = logging.getLogger(__name__)
 
 
 def _require_login() -> None:

@@ -16,7 +16,6 @@ Streamlit app:
 
 from __future__ import annotations
 
-import logging
 import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Optional, Sequence, Set, cast
@@ -24,12 +23,11 @@ from typing import Any, Mapping, Optional, Sequence, Set, cast
 from bson import ObjectId
 from pymongo.collection import Collection
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
 from vgs_chatbot.embeddings import FastEmbedder
 from vgs_chatbot.kg import expand_candidate_chunk_ids, extract_keyphrases
 from vgs_chatbot.utils_text import clean_title
-
-logger = logging.getLogger(__name__)
 
 # Minimal stopword set used only for building compact lexical variants and
 # fallback filters; not intended to be a comprehensive list.
@@ -318,16 +316,16 @@ def _text_search(
                     "_id": 1,
                     "doc_id": 1,
                     "doc_title": 1,
-                "section_title": 1,
-                "section_id": 1,
-                "section_path": 1,
-                "order_code": 1,
-                "chunk_type": 1,
-                "page_start": 1,
-                "page_end": 1,
-                "text": 1,
-                "score": {"$meta": "searchScore"},
-            }
+                    "section_title": 1,
+                    "section_id": 1,
+                    "section_path": 1,
+                    "order_code": 1,
+                    "chunk_type": 1,
+                    "page_start": 1,
+                    "page_end": 1,
+                    "text": 1,
+                    "score": {"$meta": "searchScore"},
+                }
             },
         ]
     )
@@ -468,7 +466,9 @@ def _make_chunk(item: dict[str, Any]) -> RetrievedChunk:
     )
 
 
-def _boost_by_metadata(chunks: list[RetrievedChunk], query: str) -> list[RetrievedChunk]:
+def _boost_by_metadata(
+    chunks: list[RetrievedChunk], query: str
+) -> list[RetrievedChunk]:
     """Apply light metadata-aware boosts (order code, paragraph vs table)."""
     order_codes = _extract_order_codes(query)
     prefers_table = _prefers_table_results(query)
@@ -485,14 +485,18 @@ def _boost_by_metadata(chunks: list[RetrievedChunk], query: str) -> list[Retriev
             bonus += 0.05
         if bonus:
             chunk.score += bonus
-            chunk.source_scores["metadata"] = chunk.source_scores.get("metadata", 0.0) + bonus
+            chunk.source_scores["metadata"] = (
+                chunk.source_scores.get("metadata", 0.0) + bonus
+            )
 
     return sorted(chunks, key=lambda c: c.score, reverse=True)
 
 
 def _extract_order_codes(text: str) -> Set[str]:
     """Extract normalised order codes from a query (e.g., DHO 2103)."""
-    matches = re.findall(r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, flags=re.IGNORECASE)
+    matches = re.findall(
+        r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, flags=re.IGNORECASE
+    )
     codes: Set[str] = set()
     for prefix, digits in matches:
         codes.add(f"{prefix.lower()}{digits}")
@@ -501,7 +505,11 @@ def _extract_order_codes(text: str) -> Set[str]:
 
 def _prefers_table_results(query: str) -> bool:
     """Heuristic: return True when the query likely wants structured/table data."""
-    return bool(re.search(r"\b(table|list|matrix|summary|limits?)\b", query, flags=re.IGNORECASE))
+    return bool(
+        re.search(
+            r"\b(table|list|matrix|summary|limits?)\b", query, flags=re.IGNORECASE
+        )
+    )
 
 
 def _expand_query_for_text(query: str) -> list[str]:

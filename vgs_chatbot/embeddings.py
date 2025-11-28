@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from collections import OrderedDict
 from typing import Any, Iterable, List, Sequence, cast
 
 from fastembed import TextEmbedding
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
-
-logger = logging.getLogger(__name__)
 
 
 def _to_python_floats(vector: Iterable[float]) -> List[float]:
@@ -44,7 +42,9 @@ def _ensure_tqdm_lock_initialized() -> None:
             # `get_lock()` lazily initialises the internal lock if missing.
             tqdm_obj.get_lock()
     except Exception:  # pragma: no cover - defensive in case tqdm is absent
-        logger.debug("Unable to prime tqdm lock; continuing without workaround.", exc_info=True)
+        logger.debug(
+            "Unable to prime tqdm lock; continuing without workaround.", exc_info=True
+        )
 
 
 class FastEmbedder:

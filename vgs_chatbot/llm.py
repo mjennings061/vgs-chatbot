@@ -2,18 +2,16 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Iterable, List, Sequence
+from typing import Any, Iterable, List, Sequence
 
 try:
     from openai import OpenAI
 except ImportError:  # pragma: no cover - optional dependency
     OpenAI = None
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
 from vgs_chatbot.retrieve import RetrievedChunk
-
-logger = logging.getLogger(__name__)
 
 MODEL = "gpt-4.1-nano"
 
@@ -98,6 +96,11 @@ def generate_answer(query: str, chunks: List[RetrievedChunk]) -> str:
 
     settings = get_settings()
     context = _format_context(chunks)
+    logger.debug(
+        "Prepared answer context: %s characters across %s chunks.",
+        len(context),
+        len(chunks),
+    )
 
     if settings.openai_api_key and OpenAI:
         logger.debug("Generating answer via OpenAI for query '%s'.", query)
@@ -136,6 +139,7 @@ You are to answer questions using the context provided from RAG searches.
         )
         choice = response.choices[0]
         logger.info("OpenAI answer generated for query '%s'.", query)
+        _log_token_usage(getattr(response, "usage", None))
 
         message = choice.message.content
         if not message:
@@ -187,4 +191,28 @@ def _extractive_fallback(chunks: List[RetrievedChunk]) -> str:
     return (
         "LLM responses are disabled. The most relevant extract is shown below:\n\n"
         f"{snippet}"
+    )
+
+
+def _log_token_usage(usage: Any) -> None:
+    """Log token counts from an OpenAI response, handling older/newer schemas."""
+    if not usage:
+        return
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+    total_tokens = getattr(usage, "total_tokens", None)
+
+    # Newer SDKs may expose input/output fields instead.
+    if prompt_tokens is None:
+        prompt_tokens = getattr(usage, "input_tokens", None)
+    if completion_tokens is None:
+        completion_tokens = getattr(usage, "output_tokens", None)
+    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens
+
+    logger.info(
+        "OpenAI token usage - prompt: %s, completion: %s, total: %s",
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
     )

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from itertools import combinations
 from typing import Iterable, List, Optional, Set
@@ -13,7 +12,7 @@ from bson.errors import InvalidId
 from pymongo import ReturnDocument
 from pymongo.collection import Collection
 
-logger = logging.getLogger(__name__)
+from vgs_chatbot import logger
 
 _KG_STOPWORDS: Set[str] = {
     # Generic structure words/headings
@@ -62,6 +61,7 @@ _KG_BAD_PATTERNS = [
     r"\bblank\s+for\s+pagination\b",
     r"\bnumber\s+description\b",
 ]
+
 
 def extract_keyphrases(
     text: str, max_k: int = 8, stopwords: Optional[Set[str]] = None

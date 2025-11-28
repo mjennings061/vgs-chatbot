@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import logging
-
 import streamlit as st
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
 from vgs_chatbot.db import (
     connect_default,
@@ -13,8 +12,6 @@ from vgs_chatbot.db import (
     update_last_login,
     verify_password,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def _ensure_state() -> None:
@@ -40,7 +37,7 @@ def main() -> None:
         st.caption(str(exc))
         st.stop()
 
-    st.image("media/2fts.png", use_container_width=True)
+    st.image("media/2fts.png", width="content")
     st.title("RAF 2FTS Knowledge Assistant")
 
     if st.session_state["logged_in"]:
