@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-import logging
-
 import streamlit as st
 
+from vgs_chatbot import logger
 from vgs_chatbot.db import (
     connect_default,
     create_user,
     find_user_by_email,
     update_last_login,
 )
-
-logger = logging.getLogger(__name__)
-
 
 ALLOWED_DOMAINS = ("@mod.uk", "@rafac.mod.gov.uk")
 
@@ -27,7 +23,7 @@ def _email_allowed(email: str) -> bool:
 
 def main() -> None:
     """Render the registration form for new users."""
-    st.image("media/2fts.png", use_container_width=True)
+    st.image("media/2fts.png", width="content")
     st.title("Create an account")
     st.caption("Only RAF or MOD email addresses are eligible.")
 

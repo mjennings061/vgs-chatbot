@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import io
-import logging
 import re
 from dataclasses import dataclass
 from typing import List, Sequence, Tuple
@@ -11,7 +10,7 @@ from typing import List, Sequence, Tuple
 import pdfplumber
 from docx import Document
 
-logger = logging.getLogger(__name__)
+from vgs_chatbot import logger
 
 
 @dataclass
@@ -267,7 +266,9 @@ def chunk_text(
                     ChunkFragment(
                         text=buffer.strip(),
                         kind="text",
-                        page_start=min(buffer_pages) if buffer_pages else block.page_start,
+                        page_start=(
+                            min(buffer_pages) if buffer_pages else block.page_start
+                        ),
                         page_end=max(buffer_pages) if buffer_pages else block.page_end,
                     )
                 )
@@ -297,8 +298,12 @@ def chunk_text(
                         ChunkFragment(
                             text=buffer.strip(),
                             kind="text",
-                            page_start=min(buffer_pages) if buffer_pages else block.page_start,
-                            page_end=max(buffer_pages) if buffer_pages else block.page_end,
+                            page_start=(
+                                min(buffer_pages) if buffer_pages else block.page_start
+                            ),
+                            page_end=(
+                                max(buffer_pages) if buffer_pages else block.page_end
+                            ),
                         )
                     )
                 buffer = paragraph
@@ -347,11 +352,17 @@ def _looks_like_heading(line: str, next_line: str | None = None) -> bool:
     # Very short alphabetic strings like "A O O" are often line-wrapped words, not headings.
     alpha_chars = [ch for ch in cleaned if ch.isalpha()]
     if len(alpha_chars) < 4 and not re.match(
-        r"^(?:RA|AESO|GASO|DHO|DHE|DHI)\s*\d{3,4}(?:\([^)]+\))?:?.*$", cleaned, re.IGNORECASE
+        r"^(?:RA|AESO|GASO|DHO|DHE|DHI)\s*\d{3,4}(?:\([^)]+\))?:?.*$",
+        cleaned,
+        re.IGNORECASE,
     ):
         return False
 
-    if re.match(r"^(?:RA|AESO|GASO|DHO|DHE|DHI)\s*\d{3,4}(?:\([^)]+\))?:?.*$", cleaned, re.IGNORECASE):
+    if re.match(
+        r"^(?:RA|AESO|GASO|DHO|DHE|DHI)\s*\d{3,4}(?:\([^)]+\))?:?.*$",
+        cleaned,
+        re.IGNORECASE,
+    ):
         return True
     if re.match(r"^\d+(\.\d+)*\s+[A-Z].*", cleaned):
         return True
@@ -365,7 +376,11 @@ def _looks_like_heading(line: str, next_line: str | None = None) -> bool:
         return True
 
     # Headings are often surrounded by blank lines; prefer those.
-    if ratio > 0.65 and len(words) <= 8 and (next_line is None or not next_line.strip()):
+    if (
+        ratio > 0.65
+        and len(words) <= 8
+        and (next_line is None or not next_line.strip())
+    ):
         return True
     return False
 
@@ -538,7 +553,9 @@ def _extract_order_code(text: str | None) -> str | None:
     """Extract an order code like DHO/AESO/GASO from a heading if present."""
     if not text:
         return None
-    match = re.search(r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, re.IGNORECASE)
+    match = re.search(
+        r"\b(RA|AESO|GASO|DHO|DHE|DHI)\s*([0-9]{2,4})\b", text, re.IGNORECASE
+    )
     if not match:
         return None
     prefix, digits = match.groups()

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any, Dict, List
 
 import streamlit as st
@@ -10,14 +9,13 @@ from bson import ObjectId
 from gridfs import GridFS
 from pymongo.collection import Collection
 
+from vgs_chatbot import logger
 from vgs_chatbot.db import get_collections, get_gridfs
 from vgs_chatbot.embeddings import get_embedder
 from vgs_chatbot.ingest import ingest_file
 from vgs_chatbot.utils_text import clean_title
 
 CollectionsMap = Dict[str, Collection]
-
-logger = logging.getLogger(__name__)
 
 
 def _require_login() -> None:

@@ -7,17 +7,16 @@ Local development can still use a `.env` file (loaded via python-dotenv).
 
 from __future__ import annotations
 
-import logging
 import os
 from functools import lru_cache
 from typing import Optional
 
 from dotenv import load_dotenv
 
+from vgs_chatbot import logger
+
 # Load .env for local development so env vars are available via os.getenv
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 
 def _get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -49,11 +48,6 @@ class Settings:
             )
 
         self.openai_api_key: Optional[str] = _get_secret("OPENAI_API_KEY")
-
-    # Read-only properties backed by module-level constants below.
-    @property
-    def log_level(self) -> str:
-        return "DEBUG"
 
     @property
     def mongodb_db(self) -> str:

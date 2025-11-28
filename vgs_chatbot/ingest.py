@@ -13,6 +13,7 @@ from bson import ObjectId
 from gridfs import GridFS
 from pymongo.collection import Collection
 
+from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
 from vgs_chatbot.embeddings import FastEmbedder
 from vgs_chatbot.kg import extract_keyphrases, upsert_nodes_edges
@@ -24,9 +25,6 @@ from vgs_chatbot.utils_text import (
     read_docx,
     read_pdf,
 )
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class IngestResult:
