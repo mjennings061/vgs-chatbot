@@ -29,9 +29,6 @@ def _require_login() -> None:
 
 def _sign_out() -> None:
     """Clear session data and return to the login screen."""
-    client = st.session_state.get("mongo_client")
-    if client:
-        client.close()
     st.session_state.clear()
     try:
         st.switch_page("pages/0_Login.py")

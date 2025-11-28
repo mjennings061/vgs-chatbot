@@ -70,21 +70,16 @@ def main() -> None:
         user = find_user_by_email(client, email_input)
         if not user:
             st.error("Login failed. Please check the credentials.")
-            client.close()
             return
         if not user.get("is_active", True):
             st.error("This account is inactive. Please contact an administrator.")
-            client.close()
             return
         if not verify_password(password.strip(), user.get("password_hash", "")):
             st.error("Login failed. Please check the credentials.")
-            client.close()
             return
         if user.get("_id"):
             update_last_login(client, user["_id"])
     except Exception as exc:  # noqa: BLE001 - surface friendly message
-        if client:
-            client.close()
         logger.warning(
             "Login failed for user '%s': %s", email_input, exc, exc_info=True
         )

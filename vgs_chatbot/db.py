@@ -66,6 +66,10 @@ def connect_default() -> MongoClient:
     Returns:
         MongoClient: Authenticated client instance (cached with TTL).
 
+    Note:
+        The client is cached and shared across Streamlit reruns/sessions; callers
+        should not close it manually. Let the TTL or process shutdown handle it.
+
     Raises:
         PyMongoError: If the connection attempt fails.
     """
