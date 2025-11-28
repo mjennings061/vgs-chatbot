@@ -40,6 +40,7 @@ def main() -> None:
         st.caption(str(exc))
         st.stop()
 
+    st.image("media/2fts.png", use_container_width=True)
     st.title("RAF 2FTS Knowledge Assistant")
 
     if st.session_state["logged_in"]:
