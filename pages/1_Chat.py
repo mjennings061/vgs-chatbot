@@ -59,7 +59,7 @@ def main() -> None:
         None: Streamlit handles the rendering pipeline.
     """
     _require_login()
-    st.title("Viking Knowledge Chat")
+    st.title("VGS Knowledge Assistant")
     st.caption("Ask about RAF 2FTS Viking procedures and receive cited answers.")
 
     if st.button("Sign out"):

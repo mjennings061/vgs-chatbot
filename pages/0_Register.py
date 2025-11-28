@@ -27,6 +27,7 @@ def _email_allowed(email: str) -> bool:
 
 def main() -> None:
     """Render the registration form for new users."""
+    st.image("media/2fts.png", use_container_width=True)
     st.title("Create an account")
     st.caption("Only RAF or MOD email addresses are eligible.")
 

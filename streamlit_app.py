@@ -6,7 +6,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="VGS Chatbot",
-    page_icon="✈️",
+    page_icon="media/2fts-small.png",
 )
 def _ensure_state() -> None:
     """Initialise expected keys in the Streamlit session state."""
@@ -17,7 +17,7 @@ def _ensure_state() -> None:
     st.session_state.setdefault("chat_history", [])
 
 
-def _build_pages() -> list[st.Page]:
+def _build_pages() -> list:
     """Return the navigation structure based on authentication state."""
     login = st.Page("pages/0_Login.py", title="Sign in", icon=":material/login:")
     register = st.Page(
