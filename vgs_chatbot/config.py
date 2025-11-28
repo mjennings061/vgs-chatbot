@@ -42,17 +42,13 @@ class Settings:
     """Minimal settings holder with convenient defaults."""
 
     def __init__(self) -> None:
-        self.mongodb_host: Optional[str] = _get_secret("MONGODB_HOST")
-        if not self.mongodb_host:
+        self.mongo_uri: Optional[str] = _get_secret("MONGO_URI")
+        if not self.mongo_uri:
             raise ValueError(
-                "MONGODB_HOST is not set. Provide it via Streamlit secrets or env."
+                "MONGO_URI is not set. Provide it via Streamlit secrets or env."
             )
 
         self.openai_api_key: Optional[str] = _get_secret("OPENAI_API_KEY")
-
-        # Local dev convenience (optional). Defaults are blank strings.
-        self.app_login_user: str = _get_secret("APP_LOGIN_USER", "") or ""
-        self.app_login_pass: str = _get_secret("APP_LOGIN_PASS", "") or ""
 
     # Read-only properties backed by module-level constants below.
     @property
@@ -110,21 +106,6 @@ class Settings:
     @property
     def graph_max_candidates(self) -> int:
         return 300
-
-    def build_srv_uri(self, username: str, password: str) -> str:
-        """Return an SRV connection string for MongoDB Atlas.
-
-        Args:
-            username: Database username supplied by the end user.
-            password: Database password matching the username.
-
-        Returns:
-            str: MongoDB SRV connection string targeting the configured host.
-        """
-        return (
-            f"mongodb+srv://{username}:{password}@{self.mongodb_host}"
-            "/?retryWrites=true&w=majority&appName=vgs-chatbot"
-        )
 
 
 @lru_cache(maxsize=1)

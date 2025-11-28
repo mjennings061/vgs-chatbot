@@ -1,5 +1,7 @@
+# TODO
+
 - [x] Test CRUD with a small document
 - [x] Test uploading the DHOs
 - [x] Library is empty, but the chatbot DB has an `fs.files` collection
-- [ ] Batch document upload, but update KG after each is chunked incase it fails
-- [ ] Instead of using the DB user `chatbot` to authenticate, use the existing schema in chatbot/users where there are two hashed users as examples
+- [x] Batch document upload, but update KG after each is chunked incase it fails
+- [x] Instead of using the DB user `chatbot` to authenticate, use the existing schema in chatbot/users where there are two hashed users as examples

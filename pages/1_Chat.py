@@ -30,6 +30,18 @@ def _require_login() -> None:
         st.stop()
 
 
+def _sign_out() -> None:
+    """Clear session data and return to the login screen."""
+    client = st.session_state.get("mongo_client")
+    if client:
+        client.close()
+    st.session_state.clear()
+    try:
+        st.switch_page("pages/0_Login.py")
+    except Exception:
+        st.rerun()
+
+
 def _clear_history() -> None:
     """Remove all previously asked questions from the chat history.
 
@@ -49,6 +61,10 @@ def main() -> None:
     _require_login()
     st.title("Viking Knowledge Chat")
     st.caption("Ask about RAF 2FTS Viking procedures and receive cited answers.")
+
+    if st.button("Sign out"):
+        _sign_out()
+        st.stop()
 
     client = st.session_state["mongo_client"]
     collections = get_collections(client)
