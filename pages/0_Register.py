@@ -62,14 +62,11 @@ def main() -> None:
         client = connect_default()
         if find_user_by_email(client, email_clean):
             st.error("An account with this email already exists. Please sign in.")
-            client.close()
             return
         user = create_user(client, email_clean, password)
         if user.get("_id"):
             update_last_login(client, user["_id"])
     except Exception as exc:  # noqa: BLE001 - surface friendly message
-        if client:
-            client.close()
         logger.exception("Registration failed for '%s'.", email_clean)
         st.error("Registration failed. Please try again or contact an administrator.")
         st.caption(str(exc))
