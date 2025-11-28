@@ -4,7 +4,7 @@ A Streamlit application that lets RAF 2FTS instructors explore Viking training m
 
 ## Features
 
-- Streamlit login screen backed by MongoDB Atlas demo credentials stored in `.env`.
+- Streamlit login and registration backed by `chatbot.users` with hashed passwords.
 - Document ingestion for PDF and DOCX files with progress reporting; sources live in GridFS.
 - Automatic section detection, ~900 character chunking, and FastEmbed embeddings.
 - Lightweight knowledge graph that links keyphrases to chunk candidates.
@@ -38,15 +38,11 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-Edit `.streamlit/secrets.toml` with the Atlas host and optional OpenAI API key. The application reads:
+Edit `.streamlit/secrets.toml` (or `.env`) with:
 
-- `MONGODB_HOST` – Atlas SRV host (without the `mongodb+srv://` prefix)
+- `MONGO_URI` – full Atlas connection string (for example `mongodb+srv://user:pass@cluster0.example.mongodb.net/?retryWrites=true&w=majority&appName=vgs-chatbot`)
 - `OPENAI_API_KEY` – optional; enables generative answers instead of the extractive fallback
 - `LOG_LEVEL` – optional; adjusts app logging (`INFO` by default)
-
-Local development convenience (not required in production):
-
-- `APP_LOGIN_USER` / `APP_LOGIN_PASS` – shown on the login form if present
 
 ## Prepare MongoDB Atlas
 
@@ -99,7 +95,7 @@ Atlas Search (`doc_chunks`, name `vgs_text`)
 streamlit run streamlit_app.py
 ```
 
-1. Open the displayed local URL, sign in with the credentials from `.env`, and the home page will confirm the Atlas host in use.
+1. Open the displayed local URL, register with an eligible email, or sign in with an existing account.
 2. Use the sidebar to open **Chat** or **Admin**.
 
 ### Admin workflow

@@ -97,10 +97,9 @@ streamlit run streamlit_app.py
 
 Environment variables (set in `.env` or `.streamlit/secrets.toml`):
 
-- `MONGODB_HOST`: Atlas cluster host (without `mongodb+srv://` prefix) - **required**
+- `MONGO_URI`: Full Atlas connection string (e.g. `mongodb+srv://user:pass@host/?retryWrites=true&w=majority&appName=vgs-chatbot`) - **required**
 - `OPENAI_API_KEY`: Optional; enables generative answers instead of extractive fallback
 - `LOG_LEVEL`: Optional; defaults to `DEBUG` (see [vgs_chatbot/config.py:60](vgs_chatbot/config.py#L60))
-- `APP_LOGIN_USER` / `APP_LOGIN_PASS`: Optional; pre-fills login form for local dev
 
 ### Code Quality Tools
 
@@ -134,7 +133,7 @@ pyright
 Streamlit session state ([streamlit_app.py](streamlit_app.py)) tracks:
 
 - `logged_in`: Authentication status
-- `username`: Current user
+- `user_email` / `user_role` / `user_id`: Current user identifiers
 - `mongo_client`: Authenticated MongoDB client (closed on logout)
 - `chat_history`: List of Q&A turns with citations
 - `redirected_after_login`: Flag to auto-navigate to Chat page after login
@@ -187,6 +186,4 @@ KG provides a small score bonus (0.1) and candidate expansion (max 300 chunks). 
 
 ## Future Work
 
-See [TODO](TODO) for tracked tasks. Notable planned improvements:
-
-- Replace MongoDB username/password auth with app-level user management (`chatbot.users` collection with hashed passwords)
+See [TODO](TODO) for tracked tasks.

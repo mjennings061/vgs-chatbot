@@ -10,7 +10,6 @@ from bson import ObjectId
 from gridfs import GridFS
 from pymongo.collection import Collection
 
-from vgs_chatbot.config import get_settings
 from vgs_chatbot.db import get_collections, get_gridfs
 from vgs_chatbot.embeddings import get_embedder
 from vgs_chatbot.ingest import ingest_file
@@ -31,10 +30,29 @@ def _require_login() -> None:
         logger.warning("Unauthenticated access attempt to admin page.")
         st.error("Please sign in on the Home page before using the admin tools.")
         st.stop()
+    if st.session_state.get("user_role") != "admin":
+        logger.warning(
+            "Access denied for user '%s' attempting admin page.",
+            st.session_state.get("user_email"),
+        )
+        st.error("You need admin rights to view this page.")
+        st.stop()
     if "mongo_client" not in st.session_state:
         logger.error("Streamlit session missing MongoDB client for admin page.")
         st.error("Connection not found. Please sign in again.")
         st.stop()
+
+
+def _sign_out() -> None:
+    """Clear session data and return to the login screen."""
+    client = st.session_state.get("mongo_client")
+    if client:
+        client.close()
+    st.session_state.clear()
+    try:
+        st.switch_page("pages/0_Login.py")
+    except Exception:
+        st.rerun()
 
 
 def _delete_document(
@@ -151,15 +169,14 @@ def main() -> None:
     st.title("Document Admin")
     st.caption("Upload or remove Viking training documents for retrieval.")
 
+    if st.button("Sign out"):
+        _sign_out()
+        st.stop()
+
     client = st.session_state["mongo_client"]
     collections: CollectionsMap = get_collections(client)
     fs: GridFS = get_gridfs(client)
     embedder = get_embedder()
-
-    # Connection details are now presented on the Admin page
-    settings = get_settings()
-    with st.expander("Connection details"):
-        st.write(f"MongoDB host: `{settings.mongodb_host}`")
 
     st.subheader("Upload")
     uploaded_files = st.file_uploader(
@@ -167,7 +184,7 @@ def main() -> None:
         type=["pdf", "docx"],
         accept_multiple_files=True,
     )
-    uploader = st.session_state.get("username") or "admin"
+    uploader = st.session_state.get("user_email") or "admin"
 
     if st.button("Ingest documents", disabled=not uploaded_files):
         if not uploaded_files:
