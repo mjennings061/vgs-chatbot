@@ -41,7 +41,8 @@ class Settings:
     """Minimal settings holder with convenient defaults."""
 
     def __init__(self) -> None:
-        self.mongo_uri: Optional[str] = _get_secret("MONGO_URI")
+        # Required; validated immediately to avoid Optional typing downstream.
+        self.mongo_uri: str = _get_secret("MONGO_URI") or ""
         if not self.mongo_uri:
             raise ValueError(
                 "MONGO_URI is not set. Provide it via Streamlit secrets or env."

@@ -3,31 +3,30 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 import bcrypt
 import gridfs
+from bson import ObjectId
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.database import Database
 from pymongo.errors import PyMongoError
-from bson import ObjectId
 
 from vgs_chatbot import logger
 from vgs_chatbot.config import get_settings
 
+try:  # Optional: avoid hard dependency when running outside Streamlit.
+    import streamlit as st  # type: ignore
+except Exception:  # noqa: BLE001
+    st = None
 
-def connect_default() -> MongoClient:
-    """Connect to MongoDB Atlas using the configured URI.
+_CLIENT_TTL_SECONDS = 10 * 60  # Refresh the pooled client periodically to avoid leaks.
 
-    Returns:
-        MongoClient: Authenticated client instance.
 
-    Raises:
-        PyMongoError: If the connection attempt fails.
-    """
-    settings = get_settings()
-    uri = settings.mongo_uri
+def _create_client(uri: str) -> MongoClient:
+    """Instantiate and validate a MongoDB client."""
     logger.debug("Creating MongoDB client from configured URI.")
     client = MongoClient(uri, serverSelectionTimeoutMS=5000)
     try:
@@ -38,6 +37,42 @@ def connect_default() -> MongoClient:
         raise
     logger.info("MongoDB connection established.")
     return client
+
+
+if st:
+
+    @st.cache_resource(ttl=_CLIENT_TTL_SECONDS)
+    def _get_cached_client_streamlit(uri: str) -> MongoClient:
+        """Return a cached MongoDB client per Streamlit guidance."""
+        logger.debug("Fetching MongoDB client (Streamlit TTL cached).")
+        return _create_client(uri)
+
+    _get_cached_client = _get_cached_client_streamlit
+
+else:
+
+    @lru_cache(maxsize=1)
+    def _get_cached_client_fallback(uri: str) -> MongoClient:
+        """Fallback cache when Streamlit is unavailable."""
+        logger.warning("Using lru_cache fallback for MongoDB client caching.")
+        return _create_client(uri)
+
+    _get_cached_client = _get_cached_client_fallback
+
+
+def connect_default() -> MongoClient:
+    """Connect to MongoDB Atlas using a cached singleton client.
+
+    Returns:
+        MongoClient: Authenticated client instance (cached with TTL).
+
+    Raises:
+        PyMongoError: If the connection attempt fails.
+    """
+    settings = get_settings()
+    uri = settings.mongo_uri
+    logger.debug("Fetching MongoDB client.")
+    return _get_cached_client(uri)
 
 
 def get_database(client: MongoClient) -> Database:
