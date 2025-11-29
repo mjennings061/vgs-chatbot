@@ -180,12 +180,21 @@ def retrieve_chunks(
             filter_expr=kg_filter_expr,
         )
 
+    kg_hits: list[dict[str, Any]] = []
+    if candidate_ids:
+        kg_hits = _kg_seed_hits(
+            collection=doc_chunks,
+            candidate_ids=candidate_ids,
+            limit=settings.retrieval_top_k,
+        )
+
     # 5) Score fusion – combine signals with simple weights and a small graph
     #    bonus without hard-filtering to the KG candidates.
     fused = _fuse_results(
         vector_hits=vector_hits,
         text_hits=text_hits,
         kw_hits=kw_hits,
+        kg_hits=kg_hits,
         kg_bonus_ids=candidate_ids,
     )
     boosted = _boost_by_metadata(fused, query)
@@ -373,11 +382,44 @@ def _keyword_hits(
     return results
 
 
+def _kg_seed_hits(
+    *,
+    collection: Collection,
+    candidate_ids: Set[ObjectId],
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return raw chunk docs for KG candidates to surface KG-only hits."""
+    if not candidate_ids or limit <= 0:
+        return []
+    cursor = collection.find(
+        {"_id": {"$in": list(candidate_ids)}},
+        {
+            "doc_id": 1,
+            "doc_title": 1,
+            "section_title": 1,
+            "section_id": 1,
+            "section_path": 1,
+            "order_code": 1,
+            "chunk_type": 1,
+            "page_start": 1,
+            "page_end": 1,
+            "text": 1,
+        },
+    ).limit(limit)
+    results: list[dict[str, Any]] = []
+    for doc in cursor:
+        doc["score"] = 1.0  # Neutral base; fusion applies a modest KG weight.
+        results.append(doc)
+    logger.debug("KG seed hits returned %s items (limit=%s).", len(results), limit)
+    return results
+
+
 def _fuse_results(
     *,
     vector_hits: list[dict[str, Any]],
     text_hits: list[dict[str, Any]],
     kw_hits: list[dict[str, Any]],
+    kg_hits: list[dict[str, Any]],
     kg_bonus_ids: Set[ObjectId],
 ) -> list[RetrievedChunk]:
     """Fuse vector, text, and knowledge graph signals.
@@ -385,6 +427,7 @@ def _fuse_results(
     Args:
         vector_hits: Ranked results from vector search.
         text_hits: Ranked results from text search.
+        kg_hits: Raw KG candidate hits to surface graph-only chunks.
         kg_bonus_ids: Candidate chunk identifiers from the knowledge graph.
 
     Returns:
@@ -423,6 +466,18 @@ def _fuse_results(
         chunk.source_scores["kw"] = item.get("score", 0.0)
         # Weight tuned to surface day-limit rules alongside vector hits.
         chunk.score += item.get("score", 0.0) * 0.7
+
+    for item in kg_hits:
+        chunk_id = item.get("_id")
+        if not isinstance(chunk_id, ObjectId):
+            continue
+        chunk = fused.get(chunk_id)
+        if chunk is None:
+            chunk = _make_chunk(item)
+            fused[chunk.chunk_id] = chunk
+        chunk.source_scores["kg"] = item.get("score", 0.0)
+        # Modest weight so graph-only chunks surface without overwhelming other signals.
+        chunk.score += item.get("score", 0.0) * 0.4
 
     for chunk_id in kg_bonus_ids:
         if chunk_id in fused:

@@ -45,11 +45,23 @@ def rewrite_question(
     prompt = """
 ## Instructions
 
-You are assisting retrieval for Royal Air Force Volunteer Gliding Squadron (VGS) documents.
-- Rewrite the user's latest question to be specific, self-contained, and phrased like VGS policy/training material (Viking glider, winch launches, GIF/GS/FSC, CGS/CFS).
-- Acronyms should be preserved in your rewrite.
+You are assisting a RAG agent for Volunteer Gliding Squadron (VGS) documents.
+- Rewrite the user's question to include relevant context from prior Q&A pairs, if they are relevant to the current question.
+- Acronyms should be preserved in your rewrite without expansion.
 - Use the provided conversation history to inform the rewrite.
 - Do not invent facts. Return a single rewritten question only.
+- The question may not need rewriting; if so, return it as-is.
+
+## Examples
+
+Q: What is a G2?
+A: What is a G2 graded pilot?
+
+Q: How many launches can I do?
+A: As a pilot, what is the maximum number of launches I can do in a day?
+
+Q: I am so confused I do not know if I can fly after drinking last night.
+A: What are the alcohol limits for gliding?
 
 ## Conversation History
 
@@ -207,7 +219,11 @@ def _log_token_usage(usage: Any) -> None:
         prompt_tokens = getattr(usage, "input_tokens", None)
     if completion_tokens is None:
         completion_tokens = getattr(usage, "output_tokens", None)
-    if total_tokens is None and prompt_tokens is not None and completion_tokens is not None:
+    if (
+        total_tokens is None
+        and prompt_tokens is not None
+        and completion_tokens is not None
+    ):
         total_tokens = prompt_tokens + completion_tokens
 
     logger.info(
